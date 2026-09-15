@@ -1,0 +1,28 @@
+# --- Generated outputs: excluded, reproducible by re-running scripts ---
+outputs/
+
+# --- Raw data: exclude everything except the core parameter table ---
+data/*
+!data/Basic_data.csv
+
+# --- Python bytecode / cache ---
+__pycache__/
+*.pyc
+
+# --- IDE configuration ---
+.idea/
+.vscode/
+
+# --- OS and file browser artifacts ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+
+# --- Box sync conflict copies ---
+*conflicted*
+*Conflict*
