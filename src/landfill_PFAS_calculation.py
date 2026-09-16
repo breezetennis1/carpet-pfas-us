@@ -6,10 +6,14 @@ START_YEAR = 1990
 END_YEAR = 2060
 YEARS = [str(y) for y in range(START_YEAR, END_YEAR + 1)]
 
-CARPET_MASS_FACTOR = 23.9 * 1000
+# Carpet areal density, central estimate (SI Table S1: low/central/high = 2.2/2.35/2.5 kg/m^2),
+# matching CarpetConfig.carpet_density in src/config.py. Was previously 23.9 * 1000 (10x too high).
+CARPET_MASS_FACTOR = 2.35 * 1000
 SA = 140
 LG_DAYS = 365
-LEACHATE_ACTIVE_FRACTION = 0.035
+# Not documented in the SI as of the current draft (SI_v10.docx) - Eq. S16 (F7 = xT * WIP/SA * LG)
+# has no release/active-fraction term. Must be added to Eq. S16 during the revision.
+LEACHATE_ACTIVE_FRACTION = 0.35
 
 XT_NP = 10.6
 XT_PFAA = 4.75
