@@ -162,7 +162,7 @@ PFAS_CONFIGS: Dict[Tuple[str, str], PFASConfig] = {
     ("SP", "central"): PFASConfig(
         subclass="SP",
         estimate="central",
-        P_import=448,
+        P_import=488,
         P_production=47900,
         P_export=47900,
         P_yearlyloss_air=0,
