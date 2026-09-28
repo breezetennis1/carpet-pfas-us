@@ -221,8 +221,9 @@ def add_sp_protector_block(df, config, carpet_config) -> pd.DataFrame:
             df.loc[b, "V_new_left"] = a
             b += 1
 
-    # PFAS input from protector
-    df["F10"] = df["V_new_left"] * float(config.P_protector)
+    # PFAS input from protector; protector products are phased out with the product
+    phase = df["PhaseOut_effective"].to_numpy(dtype=float) if "PhaseOut_effective" in df.columns else 1.0
+    df["F10"] = df["V_new_left"] * float(config.P_protector) * phase
 
     return df
 
@@ -242,13 +243,11 @@ def add_flow_side(
     phase = df["PhaseOut_effective"].to_numpy(dtype=float) if "PhaseOut_effective" in df.columns else np.ones(n)
     rr = df["RR_effective"].to_numpy(dtype=float) if "RR_effective" in df.columns else df["RR_total"].to_numpy(dtype=float)
 
+    # Phase-out applies to the whole net trade flow (import and export terms), like F_production
     df["F1"] = (
         df["V_import"] * config.P_import * df["Percent_nylon"]
         - df["V_export"] * config.P_export * df["Percent_nylon"]
-    ) / 1000
-
-    # Keep F1 unchanged unless your original phase-out notebook also phase-outs import/export
-    # If later you want phase-out to affect imports/exports too, multiply F1 by phase.
+    ) * phase / 1000
 
     df["F_production"] = (
         df["V_production"] * config.P_production * df["Percent_nylon"] * phase
@@ -256,9 +255,13 @@ def add_flow_side(
 
     df["F3"] = df["F_production"] * c.production_waste_fraction * 0.15
 
-    df["F_to_air"] = config.P_yearlyloss_air * df["V_stock"] / 1000
-    df["F_to_dust"] = config.P_yearlyloss_dust * df["V_stock"] / 1000
-    df["F6"] = (df["F_to_air"] + df["F_to_dust"]) * 2  # x2: F_clean = F_air + F_dust (SI Eq. S15)
+    # In-use emission is first order in the PFAS stock at the beginning of the year (1/yr rates)
+    k_air = config.P_yearlyloss_air / config.P_production
+    k_dust = config.P_yearlyloss_dust / config.P_production
+
+    df["F_to_air"] = 0.0
+    df["F_to_dust"] = 0.0
+    df["F6"] = 0.0
 
     df["F2"] = 0.0
     df["F4"] = 0.0
@@ -268,6 +271,10 @@ def add_flow_side(
 
     F10 = df["F10"].to_numpy(dtype=float) if "F10" in df.columns else np.zeros(n, dtype=float)
 
+    df.loc[0, "F_to_air"] = k_air * S0_PFAS
+    df.loc[0, "F_to_dust"] = k_dust * S0_PFAS
+    df.loc[0, "F6"] = (df.loc[0, "F_to_air"] + df.loc[0, "F_to_dust"]) * 2  # x2: F_clean = F_air + F_dust (SI Eq. S15)
+
     df.loc[0, "F4"] = (df.loc[0, "V4"] / S0_volumn) * (S0_PFAS-df.loc[0, "F6"])
     df.loc[0, "F2"] = df.loc[0, "F1"] + df.loc[0, "F_production"] + df.loc[0, "F5"] - df.loc[0, "F3"]
     df.loc[0, "F_delta_S"] = df.loc[0, "F2"] + F10[0] - df.loc[0, "F4"] - df.loc[0, "F6"]
@@ -276,6 +283,10 @@ def add_flow_side(
     for idx in range(1, n):
         prev_stock = max(df.loc[idx - 1, "F_stock"], 0.0)
         prev_v_stock = df.loc[idx - 1, "V_stock"]
+
+        df.loc[idx, "F_to_air"] = k_air * prev_stock
+        df.loc[idx, "F_to_dust"] = k_dust * prev_stock
+        df.loc[idx, "F6"] = (df.loc[idx, "F_to_air"] + df.loc[idx, "F_to_dust"]) * 2  # x2: F_clean = F_air + F_dust (SI Eq. S15)
 
         raw_f4 = (
             (df.loc[idx - 1, "V4"] / prev_v_stock) * (prev_stock-df.loc[idx-1, "F6"])
