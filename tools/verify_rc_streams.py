@@ -9,8 +9,9 @@ Run from the repository root with the project environment:
     ...\python.exe tools\verify_rc_streams.py --phase 3 --work-dir <scratch folder>
 
 Phase 1: input checks for the commercial share phi_k and the CBECS 1990 commercial floor area.
-Phase 3: T1 exact decomposition, T2 additivity of written files, T3 impact vs the pre-R/C baseline
-         (outputs/tables/national_baseline_pre_RC/) and its decomposition, T4 commercial shares.
+Phase 3: T1 exact decomposition (constant phi, R + C vs a single-stream run of the current model),
+         T2 additivity of written files, T3 impact of the R/C structure vs the same single-stream run
+         and its decomposition, T4 commercial shares.
          All model outputs of the tests are written to --work-dir only; nothing is written to outputs/.
 """
 
@@ -92,7 +93,7 @@ def check_phase1() -> None:
 
 
 SCENARIOS = ["BAU", "PHASE_OUT", "RECYCLE_24"]
-BASELINE_DIR = REPO / "outputs" / "tables" / "national_baseline_pre_RC"
+SINGLE_STREAM_REFERENCE = "T1_single_stream_reference"  # written by T1 into --work-dir, used by T1 and T3
 T3_YEARS = [1990, 2000, 2010, 2020, 2040, 2060]
 T3_YEARS_OTHER_SCENARIOS = [2020, 2060]
 T4_YEARS = [1990, 2000, 2020, 2060]
@@ -235,21 +236,33 @@ def central_totals(base_df, scenario, phi, s0_R, s0_C, zero_s0=False) -> pd.Data
     return build_total_output(by_subclass).set_index("year")
 
 
+def write_single_stream_reference(base_df, ref_dir: Path, scenario: str) -> None:
+    """Single-stream run of the current model (no R/C split, s0_scale = 1), saved with the runner's file layout."""
+    scenario_df = apply_scenario(base_df, scenario)
+    grouped = {estimate: {} for estimate in ESTIMATES}
+    for (subclass, estimate), config in PFAS_CONFIGS.items():
+        grouped[estimate][subclass] = run_national_model(scenario_df, config, CARPET_CONFIGS[estimate])
+    with quiet():
+        runner.save_stream_outputs(grouped, ref_dir, scenario, "")
+
+
 def check_t1(base_df, phi, work_dir: Path) -> bool:
     c = float(phi.loc[1990])
     phi_const = pd.Series(c, index=phi.index)
     s0_scales = {"R": {e: 1 - c for e in ESTIMATES}, "C": {e: c for e in ESTIMATES}}
     t1_dir = work_dir / "T1_constant_phi"
+    ref_dir = work_dir / SINGLE_STREAM_REFERENCE
 
     tally = Tally()
     n_files = 0
     for scenario in SCENARIOS:
+        write_single_stream_reference(base_df, ref_dir, scenario)
         results = run_scenario_streams(base_df, scenario, phi_const, s0_scales)
         with quiet():
             runner.save_stream_outputs(results["TOTAL"], t1_dir, scenario, "")
         for name in file_names(scenario):
             test = read_csv(t1_dir / name)
-            base = read_csv(BASELINE_DIR / name)
+            base = read_csv(ref_dir / name)
             assert list(test.columns) == list(base.columns) and len(test) == len(base), name
             additive, fixed = split_additive(base)
             for col in additive:
@@ -259,7 +272,7 @@ def check_t1(base_df, phi, work_dir: Path) -> bool:
             n_files += 1
 
     print(f"\nT1  exact decomposition: phi = {c} for all years, s0_scale R = {1 - c:.6f}, C = {c:.6f}; "
-          f"{n_files} files vs {BASELINE_DIR.name}/")
+          f"R + C in {n_files} files vs a single-stream run of the current model")
     return tally.report("T1")
 
 
@@ -294,15 +307,15 @@ def check_t3(base_df, phi, f_c, final_dir: Path, work_dir: Path) -> None:
     phi_const = pd.Series(c, index=phi.index)
     scales = {m: build_s0_scales(base_df, phi, f_c, m)["C"]["central"] for m in runner.S0_C_METHODS}
 
-    print("\nT3  impact vs baseline (central, all-subclass totals, % of baseline)")
-    print(f"    runs: B = baseline; A0 = constant phi {c}, S0_C = 0; A1 = constant phi, S0_C added; "
+    print("\nT3  impact vs the single-stream current model (central, all-subclass totals, % of reference)")
+    print(f"    runs: B = single-stream run of the current model (no R/C split, no S0_C); A0 = constant phi {c}, S0_C = 0; A1 = constant phi, S0_C added; "
           f"F = time-varying phi, S0_C added")
     print(f"    s0_scale_C (central): cbecs = {scales['cbecs']:.6f}, sales_ratio = {scales['sales_ratio']:.6f}")
     print("    total = F - B = (0) A0 - B [stream structure] + (i) A1 - A0 [S0_C] + (ii) F - A1 [time-varying phi]")
 
     rows = []
     for scenario in SCENARIOS:
-        B = read_csv(BASELINE_DIR / f"TOTAL_CENTRAL_ALL_SUBCLASSES_{scenario}.csv").set_index("year")
+        B = read_csv(work_dir / SINGLE_STREAM_REFERENCE / f"TOTAL_CENTRAL_ALL_SUBCLASSES_{scenario}.csv").set_index("year")
         A0 = central_totals(base_df, scenario, phi_const, 1.0, 0.0, zero_s0=True)
         runs = {"A0": A0}
         for m in runner.S0_C_METHODS:
@@ -387,7 +400,7 @@ def check_file_counts(final_dir: Path) -> None:
     print(f"    R_C_share_summary: {sum(n in names for n in summaries)} / 3; total files in dir: {len(names)}")
 
 
-def check_phase3(work_dir: Path) -> None:
+def check_phase3(work_dir: Path, t1_only: bool = False) -> None:
     work_dir.mkdir(parents=True, exist_ok=True)
     base_df = load_basic_data(REPO / "data" / "Basic_data.csv")
     phi = load_commercial_share(REPO / COMMERCIAL_SHARE_CSV)
@@ -397,6 +410,8 @@ def check_phase3(work_dir: Path) -> None:
     if not t1_ok:
         print("T1 FAILED - stopping.")
         sys.exit(1)
+    if t1_only:
+        return
 
     final_dir = work_dir / "final_cbecs"
     run_all_cases_to(final_dir)
@@ -418,13 +433,14 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--phase", type=int, choices=[1, 3], required=True)
     p.add_argument("--work-dir", type=Path, help="scratch folder for test outputs (phase 3)")
+    p.add_argument("--t1-only", action="store_true", help="phase 3: run T1 only")
     args = p.parse_args()
     if args.phase == 1:
         check_phase1()
     elif args.phase == 3:
         if args.work_dir is None:
             p.error("--phase 3 requires --work-dir")
-        check_phase3(args.work_dir)
+        check_phase3(args.work_dir, t1_only=args.t1_only)
 
 
 if __name__ == "__main__":
