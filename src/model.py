@@ -119,7 +119,7 @@ def build_yearly_eol_matrix(years, sales, carpet_config) -> np.ndarray:
     return probs * sales[:, None]
 
 
-def add_volume_side(df, carpet_config) -> pd.DataFrame:
+def add_volume_side(df, carpet_config, s0_scale: float = 1.0) -> pd.DataFrame:
     years = df["year"].to_numpy()
     sales_base = df["V_sales_nylon"].to_numpy(dtype=float)
 
@@ -132,7 +132,7 @@ def add_volume_side(df, carpet_config) -> pd.DataFrame:
     dist = get_lifetime_distribution(carpet_config)
     n = len(df)
 
-    S0_volumn = compute_initial_stock_volume(df, carpet_config)
+    S0_volumn = compute_initial_stock_volume(df, carpet_config) * s0_scale
 
     yearly_eol = build_yearly_eol_matrix(years, sales, carpet_config)
     V_new_EoL = yearly_eol.sum(axis=0)
@@ -230,12 +230,13 @@ def add_sp_protector_block(df, config, carpet_config) -> pd.DataFrame:
 def add_flow_side(
     df: pd.DataFrame,
     config: PFASConfig,
-    carpet_config: CarpetConfig
+    carpet_config: CarpetConfig,
+    s0_scale: float = 1.0,
 ) -> pd.DataFrame:
     c = MODEL_CONSTANTS
     n = len(df)
 
-    S0_volumn = compute_initial_stock_volume(df, carpet_config)
+    S0_volumn = compute_initial_stock_volume(df, carpet_config) * s0_scale
     S0_PFAS = (S0_volumn * config.P_production * c.initial_stock_retention) / 1000
 
     phase = df["PhaseOut_effective"].to_numpy(dtype=float) if "PhaseOut_effective" in df.columns else np.ones(n)
@@ -257,7 +258,7 @@ def add_flow_side(
 
     df["F_to_air"] = config.P_yearlyloss_air * df["V_stock"] / 1000
     df["F_to_dust"] = config.P_yearlyloss_dust * df["V_stock"] / 1000
-    df["F6"] = (df["F_to_air"] + df["F_to_dust"]) * 2
+    df["F6"] = (df["F_to_air"] + df["F_to_dust"]) * 2  # x2: F_clean = F_air + F_dust (SI Eq. S15)
 
     df["F2"] = 0.0
     df["F4"] = 0.0
@@ -330,15 +331,16 @@ def add_leachate_block(df: pd.DataFrame, config: PFASConfig, carpet_config: Carp
 def run_national_model(
     df: pd.DataFrame,
     config: PFASConfig,
-    carpet_config: CarpetConfig
+    carpet_config: CarpetConfig,
+    s0_scale: float = 1.0,
 ) -> pd.DataFrame:
     out = df.copy()
 
     out = fit_and_apply_nylon_share(out, carpet_config)
 
-    out = add_volume_side(out, carpet_config)
+    out = add_volume_side(out, carpet_config, s0_scale)
     out = add_sp_protector_block(out, config, carpet_config)
-    out = add_flow_side(out, config, carpet_config)
+    out = add_flow_side(out, config, carpet_config, s0_scale)
     out = add_leachate_block(out, config, carpet_config)
 
     return out
