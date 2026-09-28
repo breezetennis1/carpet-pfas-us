@@ -234,7 +234,7 @@ def plot_figure2(
             alpha=0.5,
         )
 
-        _format_axis(ax, ylabel, panel_labels_rc[j], show_xlabel=False, label_right=(j == 0))
+        _format_axis(ax, ylabel, panel_labels_rc[j], show_xlabel=False, label_right=(j in (0, 1)))
 
     # Middle row: stacked subclass plots under BAU
     for j, (metric, ylabel) in enumerate(metric_map):
@@ -256,7 +256,7 @@ def plot_figure2(
             alpha=0.5,
         )
 
-        _format_axis(ax, ylabel, panel_labels_top[j], show_xlabel=False, label_right=(j == 0))
+        _format_axis(ax, ylabel, panel_labels_top[j], show_xlabel=False, label_right=(j in (0, 1)))
 
         # Residential + commercial and SP + NP + PFAA are the same total: same y-axis
         subclass_total = df.set_index("year")[["SP", "NP", "PFAA"]].sum(axis=1)
@@ -305,7 +305,7 @@ def plot_figure2(
             label=SCENARIO_LABELS["PHASE_OUT"],
         )
 
-        _format_axis(ax, ylabel, panel_labels_bottom[j], show_xlabel=False, label_right=(j == 0))
+        _format_axis(ax, ylabel, panel_labels_bottom[j], show_xlabel=False, label_right=(j in (0, 1)))
 
     scenario_handles = [
         Line2D([0], [0], color=SCENARIO_COLORS["BAU"], lw=6, linestyle="-", label=SCENARIO_LABELS["BAU"]),
