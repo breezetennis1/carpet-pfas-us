@@ -13,7 +13,8 @@ Model variants (src/model.py holds only the final code; the earlier steps are re
   B  : A + phase-out applied to the net trade flow F1
   C  : B + first-order in-use emission             (= D with the F10 phase-out reverted)
   D  : C + phase-out applied to the post-sale protector input F10   (= E with the old leachate block)
-  E  : D + mass-conserving landfill leachate (working-tree model.py) = final
+  E  : D + mass-conserving landfill leachate                        (= F with the S0 age factor reverted)
+  F  : E + initial PFAS stock net of pre-1990 in-use emission (working-tree model.py) = final
 All outputs are written to --work-dir only.
 """
 
@@ -44,8 +45,8 @@ from verify_rc_streams import check_t2, check_t4, read_csv  # noqa: E402
 B1_COMMIT = "e287d94"
 B1_DIR = REPO / "outputs" / "tables" / "national_baseline_pre_massfix"
 SCENARIOS = ["BAU", "PHASE_OUT", "RECYCLE_24"]
-STEPS = ["B1", "A", "B", "C", "D", "E"]
-FINAL = "E"
+STEPS = ["B1", "A", "B", "C", "D", "E", "F"]
+FINAL = "F"
 
 F1_UNPHASED = '''    df["F1"] = (
         df["V_import"] * config.P_import * df["Percent_nylon"]
@@ -94,6 +95,40 @@ def patched(source: str, old: str, new: str, what: str) -> str:
     return source.replace(old, new)
 
 
+# Step F -> E: S0_PFAS without the pre-1990 emission factor; k_air / k_dust defined where they were before.
+S0AGE_F = '''    S0_volumn = compute_initial_stock_volume(df, carpet_config) * s0_scale
+
+    # In-use emission is first order in the PFAS stock at the beginning of the year (1/yr rates)
+    k_air = config.P_yearlyloss_air / config.P_production
+    k_dust = config.P_yearlyloss_dust / config.P_production
+    k_total = 2 * (k_air + k_dust)  # same rate as F6 = k_total x previous stock
+
+    # PFAS lost by in-use emission before 1990 (mean age of initial stock)
+    f_age = (1 - k_total) ** carpet_config.initial_stock_age
+    S0_PFAS = (S0_volumn * config.P_production * c.initial_stock_retention) / 1000 * f_age
+'''
+S0AGE_E = '''    S0_volumn = compute_initial_stock_volume(df, carpet_config) * s0_scale
+    S0_PFAS = (S0_volumn * config.P_production * c.initial_stock_retention) / 1000
+'''
+KDEF_F = '''    df["F3"] = df["F_production"] * c.production_waste_fraction * 0.15
+
+    df["F_to_air"] = 0.0
+'''
+KDEF_E = '''    df["F3"] = df["F_production"] * c.production_waste_fraction * 0.15
+
+    # In-use emission is first order in the PFAS stock at the beginning of the year (1/yr rates)
+    k_air = config.P_yearlyloss_air / config.P_production
+    k_dust = config.P_yearlyloss_dust / config.P_production
+
+    df["F_to_air"] = 0.0
+'''
+
+
+def revert_s0age(source: str) -> str:
+    source = patched(source, S0AGE_F, S0AGE_E, "S0 age")
+    return patched(source, KDEF_F, KDEF_E, "k_air / k_dust definition")
+
+
 def revert_leachate(source: str) -> str:
     source = patched(source, LEACH_E_NOLEACH, LEACH_D_NOLEACH, "no-leachate branch")
     if source.count(LEACH_E_START) != 1 or source.count(LEACH_E_END) != 1:
@@ -106,8 +141,10 @@ def revert_leachate(source: str) -> str:
 def build_model(step: str) -> types.ModuleType:
     if step == FINAL:
         return model
-    if step in ("C", "D"):
-        source = revert_leachate(Path(model.__file__).read_text(encoding="utf-8"))
+    if step in ("C", "D", "E"):
+        source = revert_s0age(Path(model.__file__).read_text(encoding="utf-8"))
+        if step in ("C", "D"):
+            source = revert_leachate(source)
         if step == "C":
             source = patched(source, F10_PHASED, F10_UNPHASED, "F10")
     else:
@@ -179,8 +216,14 @@ def step_dir(work_dir: Path, step: str) -> Path:
     return out
 
 
-def s0_pfas_by_stream() -> dict:
-    """Initial PFAS stock (kg) per (subclass, estimate, stream), exactly as add_flow_side computes it."""
+def f_age_factor(cfg, cc) -> float:
+    """Fraction of PFAS remaining after initial_stock_age years of first-order in-use emission (step F)."""
+    k_total = 2 * (cfg.P_yearlyloss_air + cfg.P_yearlyloss_dust) / cfg.P_production
+    return (1 - k_total) ** cc.initial_stock_age
+
+
+def s0_pfas_by_stream(with_age: bool = True) -> dict:
+    """Initial PFAS stock (kg) and volume per (subclass, estimate, stream), as add_flow_side computes them."""
     base_df = load_basic_data(REPO / "data" / "Basic_data.csv")
     phi = load_commercial_share(REPO / runner.COMMERCIAL_SHARE_CSV)
     f_c = load_cbecs_commercial_floorspace_1990(REPO / runner.CBECS_FLOORSPACE_CSV)
@@ -191,9 +234,10 @@ def s0_pfas_by_stream() -> dict:
         s0_vol = model.compute_initial_stock_volume(model.fit_and_apply_nylon_share(base_df, cc), cc)
         per = {"R": scales["R"][estimate], "C": scales["C"][estimate]}
         per["TOTAL"] = per["R"] + per["C"]
+        age = f_age_factor(cfg, cc) if with_age else 1.0
         for stream, scale in per.items():
             out[(subclass, estimate, stream)] = (
-                s0_vol * scale * cfg.P_production * MODEL_CONSTANTS.initial_stock_retention / 1000,
+                s0_vol * scale * cfg.P_production * MODEL_CONSTANTS.initial_stock_retention / 1000 * age,
                 s0_vol * scale,
             )
     return out
@@ -210,8 +254,20 @@ def iter_cases(folder: Path):
 def check_phase2(work_dir: Path, step: str = FINAL) -> None:
     final = step_dir(work_dir, step)
     print(f"Phase 2 checks on step {step}")
-    s0 = s0_pfas_by_stream()
+    s0 = s0_pfas_by_stream(with_age=(step == "F"))
+    s0_old = s0_pfas_by_stream(with_age=False)
     ok = True
+
+    # Independent check of the initial stock: S0 implied by the 1990 outputs / S0 without the age factor
+    worst_age = 0.0
+    for scenario, subclass, estimate, stream, name, df in iter_cases(final):
+        r0 = df.iloc[0]
+        implied = r0["F_stock"] - (r0["F2"] + r0["F10"] - r0["F4"] - r0["F6"])
+        expected = f_age_factor(PFAS_CONFIGS[(subclass, estimate)], CARPET_CONFIGS[estimate]) if step == "F" else 1.0
+        worst_age = max(worst_age, abs(implied / s0_old[(subclass, estimate, stream)][0] / expected - 1))
+    print(f"V0  S0 implied by the 1990 outputs / S0 without age factor = f_age in all cases: "
+          f"max rel deviation = {worst_age:.2e} -> {'PASS' if worst_age <= V1_TOL else 'FAIL'}")
+    ok = ok and worst_age <= V1_TOL
 
     # V1 mass balance, V2 non-negativity, V3 F6_t <= F_stock_{t-1}
     worst_v1, floor_cases, v2_viol, worst_v3 = (0.0, ""), [], [], (-np.inf, "")
@@ -390,9 +446,9 @@ def load_series(folder: Path, name: str, metric: str) -> pd.Series:
     return read_csv(folder / name).set_index("year")[metric]
 
 
-DECOMP_STEPS = ["A", "B", "C", "D", "E"]
+DECOMP_STEPS = ["A", "B", "C", "D", "E", "F"]
 DECOMP_LABELS = {"A": "P_import 448 -> 488", "B": "phase-out on F1", "C": "first-order F6",
-                 "D": "phase-out on F10", "E": "mass-conserving leachate"}
+                 "D": "phase-out on F10", "E": "mass-conserving leachate", "F": "S0 net of pre-1990 emission"}
 
 
 def decomposition_rows(dirs: dict, name: str, metric: str, years: list, label: dict) -> list:
@@ -409,7 +465,7 @@ def decomposition_rows(dirs: dict, name: str, metric: str, years: list, label: d
         for step in DECOMP_STEPS:
             row[f"{step}_pct"] = pct(v[step], b) - pct(v[prev], b) if b else np.nan
             prev = step
-        row["E_vs_D_pct"] = pct(v["E"], v["D"])
+        row["F_vs_E_pct"] = pct(v["F"], v["E"])
         rows.append(row)
     return rows
 
@@ -421,11 +477,11 @@ def fmt(v, spec="+8.2f"):
 def print_rows(rows: list, title: str) -> None:
     print(f"\n  {title}")
     print("    metric                   year      B1_kg    final_kg     total       (A)       (B)       (C)"
-          "       (D)       (E)  | E vs D %")
+          "       (D)       (E)       (F)  | F vs E %")
     for r in rows:
         steps = "  ".join(fmt(r[f"{step}_pct"]) for step in DECOMP_STEPS)
         print(f"    {r['metric']:24s} {str(r['year']):>5s} {r['B1_kg']:11.4g} {r['final_kg']:11.4g} "
-              f"{fmt(r['total_pct'])}  {steps}  | {fmt(r['E_vs_D_pct'], '+9.3f')}")
+              f"{fmt(r['total_pct'])}  {steps}  | {fmt(r['F_vs_E_pct'], '+9.3f')}")
 
 
 def check_phase3(work_dir: Path) -> None:
