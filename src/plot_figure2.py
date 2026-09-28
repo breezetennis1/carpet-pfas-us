@@ -159,7 +159,7 @@ def _set_plot_style() -> None:
     })
 
 
-def _format_axis(ax, ylabel: str, panel_label: str, show_xlabel: bool = False) -> None:
+def _format_axis(ax, ylabel: str, panel_label: str, show_xlabel: bool = False, label_right: bool = False) -> None:
     ax.set_xlim(1990, 2060)
     ax.set_ylim(bottom=0)
     ax.set_xticks([2000, 2020, 2040, 2060])
@@ -172,14 +172,14 @@ def _format_axis(ax, ylabel: str, panel_label: str, show_xlabel: bool = False) -
     ax.tick_params(axis="both", which="major", width=1.0, length=4)
 
     ax.text(
-        0.02,
+        0.98 if label_right else 0.02,
         0.96,
         panel_label,
         transform=ax.transAxes,
         fontsize=22,
         fontweight="bold",
         va="top",
-        ha="left",
+        ha="right" if label_right else "left",
     )
 
 
@@ -234,7 +234,7 @@ def plot_figure2(
             alpha=0.5,
         )
 
-        _format_axis(ax, ylabel, panel_labels_rc[j], show_xlabel=False)
+        _format_axis(ax, ylabel, panel_labels_rc[j], show_xlabel=False, label_right=(j == 0))
 
     # Middle row: stacked subclass plots under BAU
     for j, (metric, ylabel) in enumerate(metric_map):
@@ -256,7 +256,7 @@ def plot_figure2(
             alpha=0.5,
         )
 
-        _format_axis(ax, ylabel, panel_labels_top[j], show_xlabel=False)
+        _format_axis(ax, ylabel, panel_labels_top[j], show_xlabel=False, label_right=(j == 0))
 
         # Residential + commercial and SP + NP + PFAA are the same total: same y-axis
         subclass_total = df.set_index("year")[["SP", "NP", "PFAA"]].sum(axis=1)
@@ -305,7 +305,7 @@ def plot_figure2(
             label=SCENARIO_LABELS["PHASE_OUT"],
         )
 
-        _format_axis(ax, ylabel, panel_labels_bottom[j], show_xlabel=False)
+        _format_axis(ax, ylabel, panel_labels_bottom[j], show_xlabel=False, label_right=(j == 0))
 
     scenario_handles = [
         Line2D([0], [0], color=SCENARIO_COLORS["BAU"], lw=6, linestyle="-", label=SCENARIO_LABELS["BAU"]),
@@ -325,7 +325,7 @@ def plot_figure2(
     ]
 
     fig.legend(
-        handles=scenario_handles + stack_handles + rc_handles,
+        handles=rc_handles + stack_handles + scenario_handles,
         loc="lower center",
         ncol=8,
         frameon=True,
