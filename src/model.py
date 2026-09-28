@@ -317,6 +317,7 @@ def add_leachate_block(df: pd.DataFrame, config: PFASConfig, carpet_config: Carp
         df["V_accum_landfill"] = 0.0
         df["Mass_accum_landfill"] = 0.0
         df["PFAS_landfill_leachate"] = 0.0
+        df["F_accu_landfill_deposited"] = df["F_accu_landfill"].copy()
         return df
 
     phase = df["PhaseOut_effective"].to_numpy(dtype=float) if "PhaseOut_effective" in df.columns else 1.0
@@ -326,16 +327,28 @@ def add_leachate_block(df: pd.DataFrame, config: PFASConfig, carpet_config: Carp
             + df["V_production"] * df["Percent_nylon"] * c.production_scrap_to_landfill_fraction * phase
     )
     df["V_accum_landfill"] = df["V_annual_landfill"].cumsum()
-    df["Mass_accum_landfill"] = df["V_accum_landfill"] * carpet_config.carpet_density
-    df["PFAS_landfill_leachate"] = (
-        df["Mass_accum_landfill"]
-        * float(config.xt)
-        * c.LG
-        / c.SA
-        * 365
-        / 1_000_000
-        * c.leachate_release_fraction
-    )
+    df["Mass_accum_landfill"] = df["V_accum_landfill"] * carpet_config.carpet_density  # tonnes carpet
+
+    # Leachate is first order in the landfill PFAS inventory (mass-conserving).
+    # Leachate per tonne of landfilled carpet (kg/t/yr): xt (ug/L = mg/m3) x LG (m3/ha/day) / SA (t/ha) x 365 / 1e6
+    # x release fraction. PFAS content of new carpet (kg/t): P_production x retention (ug/m2) / carpet_density
+    # (g/m2) / 1000. k_L (1/yr) is their ratio, so carpet with new-carpet PFAS content leaches at the SI Eq. rate.
+    leachate_per_tonne = float(config.xt) * c.LG / c.SA * 365 / 1_000_000 * c.leachate_release_fraction
+    pfas_per_tonne_new = config.P_production * c.initial_stock_retention / carpet_config.carpet_density / 1000
+    k_L = leachate_per_tonne / pfas_per_tonne_new
+
+    deposited = df["F_landfill_yearly"].to_numpy(dtype=float)
+    inventory = np.empty(len(df), dtype=float)
+    leachate = np.empty(len(df), dtype=float)
+    prev_inventory = 0.0
+    for idx in range(len(df)):
+        leachate[idx] = k_L * prev_inventory
+        prev_inventory = prev_inventory + deposited[idx] - leachate[idx]
+        inventory[idx] = prev_inventory
+
+    df["PFAS_landfill_leachate"] = leachate
+    df["F_accu_landfill_deposited"] = df["F_accu_landfill"].copy()
+    df["F_accu_landfill"] = inventory  # landfill PFAS inventory net of leachate
     return df
 
 
