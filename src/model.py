@@ -238,7 +238,15 @@ def add_flow_side(
     n = len(df)
 
     S0_volumn = compute_initial_stock_volume(df, carpet_config) * s0_scale
-    S0_PFAS = (S0_volumn * config.P_production * c.initial_stock_retention) / 1000
+
+    # In-use emission is first order in the PFAS stock at the beginning of the year (1/yr rates)
+    k_air = config.P_yearlyloss_air / config.P_production
+    k_dust = config.P_yearlyloss_dust / config.P_production
+    k_total = 2 * (k_air + k_dust)  # same rate as F6 = k_total x previous stock
+
+    # PFAS lost by in-use emission before 1990 (mean age of initial stock)
+    f_age = (1 - k_total) ** carpet_config.initial_stock_age
+    S0_PFAS = (S0_volumn * config.P_production * c.initial_stock_retention) / 1000 * f_age
 
     phase = df["PhaseOut_effective"].to_numpy(dtype=float) if "PhaseOut_effective" in df.columns else np.ones(n)
     rr = df["RR_effective"].to_numpy(dtype=float) if "RR_effective" in df.columns else df["RR_total"].to_numpy(dtype=float)
@@ -254,10 +262,6 @@ def add_flow_side(
     ) / 1000
 
     df["F3"] = df["F_production"] * c.production_waste_fraction * 0.15
-
-    # In-use emission is first order in the PFAS stock at the beginning of the year (1/yr rates)
-    k_air = config.P_yearlyloss_air / config.P_production
-    k_dust = config.P_yearlyloss_dust / config.P_production
 
     df["F_to_air"] = 0.0
     df["F_to_dust"] = 0.0
