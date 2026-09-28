@@ -14,8 +14,17 @@ def main() -> None:
     print(f"National tables dir: {tables_dir}")
     print(f"National tables dir exists: {tables_dir.exists()}")
 
-    # High estimate figure for main text
-    figure_high = dirs["figures_main"] / "Figure_2_high.png"
+    # Central estimate figure for main text
+    figure_central = dirs["figures_main"] / "Figure_2_central.png"
+    plot_figure2(
+        tables_dir=tables_dir,
+        figure_path=figure_central,
+        estimate="CENTRAL"
+    )
+    print(f"Saved: {figure_central}")
+
+    # High estimate figure for SI
+    figure_high = dirs["figures_si"] / "Figure_S3_high.png"
     plot_figure2(
         tables_dir=tables_dir,
         figure_path=figure_high,
@@ -24,22 +33,13 @@ def main() -> None:
     print(f"Saved: {figure_high}")
 
     # Low estimate figure for SI
-    figure_low = dirs["figures_si"] / "Figure_S3_low.png"
+    figure_low = dirs["figures_si"] / "Figure_S4_low.png"
     plot_figure2(
         tables_dir=tables_dir,
         figure_path=figure_low,
         estimate="LOW"
     )
     print(f"Saved: {figure_low}")
-
-    # Central estimate figure for SI
-    figure_central = dirs["figures_si"] / "Figure_S3_central.png"
-    plot_figure2(
-        tables_dir=tables_dir,
-        figure_path=figure_central,
-        estimate="CENTRAL"
-    )
-    print(f"Saved: {figure_central}")
 
 
 if __name__ == "__main__":

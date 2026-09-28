@@ -11,6 +11,16 @@ STACK_COLORS = {
     "PFAA": "#6E5160",
 }
 
+RC_COLORS = {
+    "R": "#8C9A5B",
+    "C": "#E0A43A",
+}
+
+RC_LABELS = {
+    "R": "Residential",
+    "C": "Commercial",
+}
+
 SCENARIO_COLORS = {
     "BAU": "black",
     "RECYCLE_24": "blue",
@@ -71,8 +81,9 @@ def _load_total_metric(
     estimate: str,
     scenario: str,
     metric: str,
+    suffix: str = "",
 ) -> pd.DataFrame:
-    file_path = tables_dir / f"TOTAL_{estimate.upper()}_ALL_SUBCLASSES_{scenario}.csv"
+    file_path = tables_dir / f"TOTAL_{estimate.upper()}_ALL_SUBCLASSES_{scenario}{suffix}.csv"
     df = _load_csv(file_path)
 
     if metric not in df.columns:
@@ -111,6 +122,23 @@ def _build_scenario_df(
     df = bau.merge(recycle, on="year").merge(phase, on="year")
 
     for col in ["BAU", "RECYCLE_24", "PHASE_OUT"]:
+        df[col] = df[col] / UNIT_DIVISOR
+
+    return df
+
+
+def _build_rc_df(
+    tables_dir: Path,
+    estimate: str,
+    scenario: str,
+    metric: str,
+) -> pd.DataFrame:
+    res = _load_total_metric(tables_dir, estimate, scenario, metric, suffix="_R").rename(columns={metric: "R"})
+    com = _load_total_metric(tables_dir, estimate, scenario, metric, suffix="_C").rename(columns={metric: "C"})
+
+    df = res.merge(com, on="year")
+
+    for col in ["R", "C"]:
         df[col] = df[col] / UNIT_DIVISOR
 
     return df
@@ -158,7 +186,7 @@ def _format_axis(ax, ylabel: str, panel_label: str, show_xlabel: bool = False) -
 def plot_figure2(
     tables_dir: Path,
     figure_path: Path,
-    estimate: str = "HIGH",
+    estimate: str = "CENTRAL",
 ) -> None:
     print(f"Start plotting Figure 2 for estimate={estimate}")
     print(f"Tables dir: {tables_dir}")
@@ -173,20 +201,44 @@ def plot_figure2(
         ("PFAS_landfill_leachate", "Landfill Leachate \n(tonnes/year)"),
     ]
 
-    panel_labels_top = ["(a)", "(b)", "(c)", "(d)"]
-    panel_labels_bottom = ["(e)", "(f)", "(g)", "(h)"]
+    panel_labels_rc = ["(a)", "(b)", "(c)", "(d)"]
+    panel_labels_top = ["(e)", "(f)", "(g)", "(h)"]
+    panel_labels_bottom = ["(i)", "(j)", "(k)", "(l)"]
 
     fig, axes = plt.subplots(
-        2,
+        3,
         4,
-        figsize=(25, 10),
+        figsize=(25, 15),
         sharex=True,
         constrained_layout=False,
     )
 
-    # Top row: stacked subclass plots under BAU
+    # Top row: stacked residential / commercial plots under BAU
+    rc_totals = {}
     for j, (metric, ylabel) in enumerate(metric_map):
         ax = axes[0, j]
+
+        df = _build_rc_df(
+            tables_dir=tables_dir,
+            estimate=estimate,
+            scenario="BAU",
+            metric=metric,
+        )
+        rc_totals[metric] = df.set_index("year")["R"] + df.set_index("year")["C"]
+
+        ax.stackplot(
+            df["year"],
+            df["R"],
+            df["C"],
+            colors=[RC_COLORS["R"], RC_COLORS["C"]],
+            alpha=0.5,
+        )
+
+        _format_axis(ax, ylabel, panel_labels_rc[j], show_xlabel=False)
+
+    # Middle row: stacked subclass plots under BAU
+    for j, (metric, ylabel) in enumerate(metric_map):
+        ax = axes[1, j]
 
         df = _build_stacked_df(
             tables_dir=tables_dir,
@@ -206,9 +258,17 @@ def plot_figure2(
 
         _format_axis(ax, ylabel, panel_labels_top[j], show_xlabel=False)
 
+        # Residential + commercial and SP + NP + PFAA are the same total: same y-axis
+        subclass_total = df.set_index("year")[["SP", "NP", "PFAA"]].sum(axis=1)
+        max_diff = (rc_totals[metric] - subclass_total).abs().max() / subclass_total.abs().max()
+        print(f"{metric}: max |(R + C) - (SP + NP + PFAA)| / max total = {max_diff:.2e}")
+        if max_diff > 1e-9:
+            raise ValueError(f"Residential + commercial total does not match subclass total for {metric}")
+        axes[0, j].set_ylim(ax.get_ylim())
+
     # Bottom row: scenario comparison
     for j, (metric, ylabel) in enumerate(metric_map):
-        ax = axes[1, j]
+        ax = axes[2, j]
 
         df = _build_scenario_df(
             tables_dir=tables_dir,
@@ -259,10 +319,15 @@ def plot_figure2(
         Patch(facecolor=STACK_COLORS["PFAA"], edgecolor="none", alpha=0.5, label="PFAA"),
     ]
 
+    rc_handles = [
+        Patch(facecolor=RC_COLORS["R"], edgecolor="none", alpha=0.5, label=RC_LABELS["R"]),
+        Patch(facecolor=RC_COLORS["C"], edgecolor="none", alpha=0.5, label=RC_LABELS["C"]),
+    ]
+
     fig.legend(
-        handles=scenario_handles + stack_handles,
+        handles=scenario_handles + stack_handles + rc_handles,
         loc="lower center",
-        ncol=6,
+        ncol=8,
         frameon=True,
         bbox_to_anchor=(0.5, 0.01),
         handlelength=2.6,
@@ -273,7 +338,7 @@ def plot_figure2(
         left=0.08,
         right=0.99,
         top=0.96,
-        bottom=0.18,
+        bottom=0.12,
         wspace=0.35,
         hspace=0.28,
     )
