@@ -8,17 +8,24 @@ import matplotlib.pyplot as plt
 from SALib.sample import sobol as sobol_sample
 from SALib.analyze import sobol as sobol_analyze
 
-from src.config import PFAS_CONFIGS, PFASConfig, CarpetConfig
-from src.io_utils import load_basic_data, save_csv
-from src.model import run_national_model
-from src.scenario import apply_scenario
+from src.config import CARPET_CONFIGS, PFAS_CONFIGS, PFASConfig, CarpetConfig
+from src.io_utils import save_csv
 from src.paths import get_output_dirs
+from src.uncertainty import (
+    EMISSION_RATES,
+    carpet_bounds,
+    check_nonnegative,
+    default_workers,
+    emission_rate_bounds,
+    evaluate_samples,
+)
 
 
 # =========================
 # 1. User settings
 # =========================
 YEARS_TO_ANALYZE = [2020, 2040, 2060]
+SOBOL_SEED = 42  # fixed seed for the scrambled Sobol sequence (reproducible sample matrix)
 OUTPUT_ORDER = ["stock", "emission", "landfill_accu", "landfill_emission"]
 TOP_N_EVOLUTION = 5
 
@@ -39,40 +46,43 @@ OUTPUT_TITLES = {
 
 # Parameters to include in Sobol
 # You can remove any parameter here if you do not want it in the analysis.
+# P_export is not a separate parameter: it is set equal to P_production (as in every config estimate).
+# In-use emission enters through the first-order rates k_air, k_dust (P_yearlyloss / P_production), with
+# P_yearlyloss = k x P_production, so the rates stay within the range of the config estimates.
 PARAMS_BY_SUBCLASS = {
     "NP": [
         "P_import",
         "P_production",
-        "P_export",
-        "P_yearlyloss_air",
-        "P_yearlyloss_dust",
+        "k_air",
+        "k_dust",
         "Prod_emi_R",
         "xt",
     ],
     "PFAA": [
         "P_import",
         "P_production",
-        "P_export",
-        "P_yearlyloss_air",
-        "P_yearlyloss_dust",
+        "k_air",
+        "k_dust",
         "Prod_emi_R",
         "xt",
     ],
     "SP": [
         "P_import",
         "P_production",
-        "P_export",
-        "P_yearlyloss_air",
-        "P_yearlyloss_dust",
+        "k_air",
+        "k_dust",
         "Prod_emi_R",
         "P_protector",
     ],
 }
 
+# Same carpet parameters as the Monte Carlo analysis, bounds from the low / high estimates in config.py
 CARPET_PARAMS = [
     "carpet_density",
     "lifespan_mean",
     "nylon_fmin",
+    "average_floor_area",
+    "initial_stock_age",
 ]
 
 
@@ -92,14 +102,17 @@ def build_sobol_problem() -> Tuple[dict, List[Tuple[str, str]]]:
         high_cfg = PFAS_CONFIGS[(subclass, "high")]
 
         for p in param_list:
-            low_val = getattr(low_cfg, p)
-            high_val = getattr(high_cfg, p)
+            if p in EMISSION_RATES:
+                lo, hi = emission_rate_bounds(low_cfg, high_cfg, p)
+            else:
+                low_val = getattr(low_cfg, p)
+                high_val = getattr(high_cfg, p)
 
-            if low_val is None or high_val is None:
-                continue
+                if low_val is None or high_val is None:
+                    continue
 
-            lo = float(min(low_val, high_val))
-            hi = float(max(low_val, high_val))
+                lo = float(min(low_val, high_val))
+                hi = float(max(low_val, high_val))
 
             # Skip fixed parameters with zero range
             if np.isclose(lo, hi):
@@ -109,16 +122,10 @@ def build_sobol_problem() -> Tuple[dict, List[Tuple[str, str]]]:
             bounds.append([lo, hi])
             param_key_order.append((subclass, p))
 
-    carpet_bounds = {
-        "carpet_density": [2.2 * 1000, 2.5 * 1000],
-        "lifespan_mean": [7.0, 11.25],
-        "nylon_fmin": [0.20, 0.40],
-        "average_floor_area": [143.1, 174.9],
-        "initial_stock_age": [3.87, 4.73],
-    }
+    bounds_carpet = carpet_bounds()
 
     for p in CARPET_PARAMS:
-        lo, hi = carpet_bounds[p]
+        lo, hi = bounds_carpet[p]
         names.append(f"carpet_{p}")
         bounds.append([lo, hi])
         param_key_order.append(("carpet", p))
@@ -164,20 +171,31 @@ def build_sampled_configs(
             "use_protector": high_cfg.use_protector,
         }
 
+    # Carpet parameters not in the problem stay at the central estimate
+    central = CARPET_CONFIGS["central"]
     carpet_values = {
         "estimate": "sobol",
-        "carpet_density": 2.35 * 1000,
-        "lifespan_mean": 9.0,
-        "nylon_fmin": 0.30,
-        "average_floor_area": 159.0,
-        "initial_stock_age": 4.3,
+        "carpet_density": central.carpet_density,
+        "lifespan_mean": central.lifespan_mean,
+        "nylon_fmin": central.nylon_fmin,
+        "average_floor_area": central.average_floor_area,
+        "initial_stock_age": central.initial_stock_age,
     }
 
+    rates = {"NP": {}, "PFAA": {}, "SP": {}}
     for value, (subclass, p) in zip(x, param_key_order):
         if subclass == "carpet":
             carpet_values[p] = float(value)
+        elif p in EMISSION_RATES:
+            rates[subclass][p] = float(value)
         else:
             sampled_values[subclass][p] = float(value)
+
+    for subclass in ["NP", "PFAA", "SP"]:
+        sampled_values[subclass]["P_export"] = sampled_values[subclass]["P_production"]
+        # Sampled rates -> P_yearlyloss; rates not in the problem (zero range) keep the template value
+        for rate, value in rates[subclass].items():
+            sampled_values[subclass][EMISSION_RATES[rate]] = value * sampled_values[subclass]["P_production"]
 
     sampled_cfgs = {
         subclass: PFASConfig(**sampled_values[subclass])
@@ -189,52 +207,8 @@ def build_sampled_configs(
     return sampled_cfgs, sampled_carpet_config
 
 
-def combine_total_outputs(result_dict: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-    years = result_dict["NP"]["year"].copy()
-
-    total = pd.DataFrame({
-        "year": years,
-        "F_stock_total": 0.0,
-        "F6_total": 0.0,
-        "F_accu_landfill_total": 0.0,
-        "PFAS_landfill_leachate_total": 0.0,
-    })
-
-    for subclass, df in result_dict.items():
-        total["F_stock_total"] += df["F_stock"].fillna(0.0)
-        total["F6_total"] += df["F6"].fillna(0.0)
-        total["F_accu_landfill_total"] += df["F_accu_landfill"].fillna(0.0)
-
-        if "PFAS_landfill_leachate" in df.columns:
-            total["PFAS_landfill_leachate_total"] += df["PFAS_landfill_leachate"].fillna(0.0)
-
-    return total
-
-
-def run_model_extract_years(
-    x: np.ndarray,
-    project_root: Path,
-    param_key_order: List[Tuple[str, str]],
-) -> Dict[Tuple[int, str], float]:
-    """
-    Run one BAU model evaluation and extract outputs at selected years.
-    """
-    input_csv = project_root / "data" / "Basic_data.csv"
-    base_df = load_basic_data(input_csv)
-    bau_df = apply_scenario(base_df, "BAU")
-
-    sampled_cfgs, sampled_carpet_config = build_sampled_configs(x, param_key_order)
-
-    subclass_results = {}
-    for subclass in ["NP", "PFAA", "SP"]:
-        subclass_results[subclass] = run_national_model(
-            bau_df,
-            sampled_cfgs[subclass],
-            sampled_carpet_config,
-        )
-
-    total_df = combine_total_outputs(subclass_results)
-
+def extract_years(total_df: pd.DataFrame) -> Dict[Tuple[int, str], float]:
+    """Outputs at the selected years from one BAU evaluation (national R + C totals)."""
     outputs = {}
     for yr in YEARS_TO_ANALYZE:
         row = total_df.loc[total_df["year"] == yr].iloc[0]
@@ -250,9 +224,10 @@ def run_sobol_analysis(
     project_root: Path,
     N: int = 512,
     calc_second_order: bool = False,
+    n_workers: int = None,
 ) -> None:
     """
-    BAU Sobol sensitivity analysis based on low-high bounds in config.py.
+    BAU Sobol sensitivity analysis of the national R + C totals, based on low-high bounds in config.py.
     """
     dirs = get_output_dirs(project_root)
     table_dir = dirs["tables_sobol"]
@@ -273,18 +248,16 @@ def run_sobol_analysis(
     param_values = sobol_sample.sample(
         problem,
         N,
-        calc_second_order=calc_second_order
+        calc_second_order=calc_second_order,
+        seed=SOBOL_SEED,
     )
     print(f"Sobol sample matrix shape: {param_values.shape}")
 
-    # 3) run model
-    results_list = []
-    for i, x in enumerate(param_values):
-        outputs = run_model_extract_years(x, project_root, param_key_order)
-        results_list.append(outputs)
-
-        if (i + 1) % 100 == 0:
-            print(f"{i + 1} Sobol runs finished")
+    # 3) run model (parallel; results in sample order)
+    samples = [build_sampled_configs(x, param_key_order) for x in param_values]
+    totals = evaluate_samples(project_root, samples, n_workers=n_workers or default_workers())
+    check_nonnegative(totals)
+    results_list = [extract_years(t) for t in totals]
 
     # 4) convert outputs
     Y = {}

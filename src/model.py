@@ -243,6 +243,10 @@ def add_flow_side(
     k_air = config.P_yearlyloss_air / config.P_production
     k_dust = config.P_yearlyloss_dust / config.P_production
     k_total = 2 * (k_air + k_dust)  # same rate as F6 = k_total x previous stock
+    if not 0 <= k_total < 1:
+        raise ValueError(
+            f"In-use emission rate k_total = {k_total:.4g}/yr outside [0, 1) for {config.subclass} ({config.estimate})"
+        )
 
     # PFAS lost by in-use emission before 1990 (mean age of initial stock)
     f_age = (1 - k_total) ** carpet_config.initial_stock_age

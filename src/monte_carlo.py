@@ -10,9 +10,15 @@ import matplotlib.pyplot as plt
 from src.paths import get_output_dirs
 
 from src.config import PFAS_CONFIGS, PFASConfig, CarpetConfig
-from src.io_utils import load_basic_data, save_csv
-from src.model import run_national_model
-from src.scenario import apply_scenario
+from src.io_utils import save_csv
+from src.uncertainty import (
+    EMISSION_RATES,
+    carpet_bounds,
+    check_nonnegative,
+    default_workers,
+    emission_rate_bounds,
+    evaluate_samples,
+)
 
 
 # =========================
@@ -25,12 +31,10 @@ UNIFORM_PARAMS = {
 }
 
 # Parameters sampled as log-uniform between low and high
+# (the in-use emission rates k_air, k_dust are also log-uniform; see sample_between_low_high)
 LOG_UNIFORM_PARAMS = {
     "P_import",
     "P_production",
-    "P_export",
-    "P_yearlyloss_air",
-    "P_yearlyloss_dust",
     "xt",
     "P_protector",
 }
@@ -76,15 +80,17 @@ def sample_between_low_high(
 ) -> PFASConfig:
     """
     Create one sampled config for a subclass using the low/high pair as bounds.
+    P_export is not sampled: exported carpet carries the production PFAS content (P_export =
+    P_production, as in every config estimate).
+    In-use emission: the first-order rates k_air, k_dust (P_yearlyloss / P_production) are sampled
+    between the low and high estimates, and P_yearlyloss = k x sampled P_production, so the rates
+    stay within the range of the config estimates.
     """
     sampled_values: Dict[str, Optional[float]] = {}
 
     param_names = [
         "P_import",
         "P_production",
-        "P_export",
-        "P_yearlyloss_air",
-        "P_yearlyloss_dust",
         "Prod_emi_R",
         "xt",
         "P_protector",
@@ -126,6 +132,18 @@ def sample_between_low_high(
         else:
             sampled_values[p] = sample_uniform(lo, hi, rng)
 
+    sampled_values["P_export"] = sampled_values["P_production"]
+
+    for rate, loss in EMISSION_RATES.items():
+        lo, hi = emission_rate_bounds(low_cfg, high_cfg, rate)
+        if np.isclose(lo, hi):
+            k = lo
+        elif lo > 0:
+            k = sample_log_uniform(lo, hi, rng)
+        else:
+            k = sample_uniform(lo, hi, rng)
+        sampled_values[loss] = k * sampled_values["P_production"]
+
     sampled_cfg = PFASConfig(
         subclass=high_cfg.subclass,
         estimate="mc",
@@ -144,13 +162,15 @@ def sample_between_low_high(
 
 
 def sample_carpet_config(rng: np.random.Generator) -> CarpetConfig:
+    """Carpet parameters sampled uniformly between the low and high estimates in config.py."""
+    bounds = carpet_bounds()
     return CarpetConfig(
         estimate="mc",
-        carpet_density=sample_uniform(2.2, 2.5, rng) * 1000,
-        lifespan_mean=sample_uniform(7.0, 11.25, rng),
-        nylon_fmin=sample_uniform(0.20, 0.40, rng),
-        average_floor_area=sample_uniform(143.1, 174.9, rng),
-        initial_stock_age=sample_uniform(3.87, 4.73, rng),
+        carpet_density=sample_uniform(*bounds["carpet_density"], rng),
+        lifespan_mean=sample_uniform(*bounds["lifespan_mean"], rng),
+        nylon_fmin=sample_uniform(*bounds["nylon_fmin"], rng),
+        average_floor_area=sample_uniform(*bounds["average_floor_area"], rng),
+        initial_stock_age=sample_uniform(*bounds["initial_stock_age"], rng),
     )
 
 
@@ -171,67 +191,33 @@ def build_sampled_subclass_configs(
     return sampled
 
 
-def combine_total_outputs(result_dict: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """
-    Sum NP + PFAA + SP for the four target outputs.
-    """
-    years = result_dict["NP"]["year"].copy()
-
-    total = pd.DataFrame({
-        "year": years,
-        "F_stock_total": 0.0,
-        "F6_total": 0.0,
-        "F_accu_landfill_total": 0.0,
-        "PFAS_landfill_leachate_total": 0.0,
-    })
-
-    for subclass, df in result_dict.items():
-        total["F_stock_total"] += df["F_stock"].fillna(0.0)
-        total["F6_total"] += df["F6"].fillna(0.0)
-        total["F_accu_landfill_total"] += df["F_accu_landfill"].fillna(0.0)
-
-        if "PFAS_landfill_leachate" in df.columns:
-            total["PFAS_landfill_leachate_total"] += df["PFAS_landfill_leachate"].fillna(0.0)
-
-    return total
-
-
 def run_monte_carlo_timeseries(
     project_root: Path,
     n_runs: int = 1000,
     seed: int = 42,
+    n_workers: Optional[int] = None,
 ) -> pd.DataFrame:
     """
-    Monte Carlo for BAU scenario only.
+    Monte Carlo for BAU scenario only, national R + C totals (see src/uncertainty.py).
+    All samples are drawn first in a fixed order, so results do not depend on n_workers.
     Returns long dataframe: year × outputs × iteration.
     """
     rng = np.random.default_rng(seed)
 
-    input_csv = project_root / "data" / "Basic_data.csv"
-    base_df = load_basic_data(input_csv)
-    bau_df = apply_scenario(base_df, "BAU")
-
-    results: List[pd.DataFrame] = []
-
-    for i in range(n_runs):
+    samples = []
+    for _ in range(n_runs):
         sampled_cfgs = build_sampled_subclass_configs(rng)
         sampled_carpet_config = sample_carpet_config(rng)
+        samples.append((sampled_cfgs, sampled_carpet_config))
 
-        subclass_results = {}
-        for subclass in ["NP", "PFAA", "SP"]:
-            subclass_results[subclass] = run_national_model(
-                bau_df,
-                sampled_cfgs[subclass],
-                sampled_carpet_config,
-            )
+    totals = evaluate_samples(project_root, samples, n_workers=n_workers or default_workers())
+    check_nonnegative(totals)
 
-        total_df = combine_total_outputs(subclass_results)
+    results: List[pd.DataFrame] = []
+    for i, total_df in enumerate(totals):
         out = total_df[["year"] + OUTPUT_COLS].copy()
         out["iteration"] = i
         results.append(out)
-
-        if (i + 1) % 100 == 0:
-            print(f"{i + 1} runs finished")
 
     mc_results = pd.concat(results, ignore_index=True)
     return mc_results
@@ -241,16 +227,19 @@ def summarize_monte_carlo(mc_results: pd.DataFrame) -> pd.DataFrame:
     """
     Compute annual p2.5, median, p97.5 for each target output.
     """
-    summary = mc_results.groupby("year")[OUTPUT_COLS].quantile([0.025, 0.5, 0.975]).unstack()
-
+    # numpy quantiles (linear interpolation, as pandas' default); avoids a pandas groupby.quantile
+    # "No matching signature found" error seen with the full 10,000-run table
     q_map = {
         0.025: "p2_5",
         0.5: "median",
         0.975: "p97_5",
     }
-
-    summary.columns = [f"{col[0]}_{q_map[col[1]]}" for col in summary.columns]
-    summary = summary.reset_index()
+    years = np.sort(mc_results["year"].unique())
+    summary = pd.DataFrame({"year": years})
+    for col in OUTPUT_COLS:
+        wide = mc_results.pivot(index="iteration", columns="year", values=col)[years].to_numpy(dtype=float)
+        for q, name in q_map.items():
+            summary[f"{col}_{name}"] = np.quantile(wide, q, axis=0)
     return summary
 
 
@@ -310,6 +299,7 @@ def run_and_save_monte_carlo(
     project_root: Path,
     n_runs: int = 1000,
     seed: int = 42,
+    n_workers: Optional[int] = None,
 ) -> None:
     dirs = get_output_dirs(project_root)
     output_dir = dirs["tables_monte_carlo"]
@@ -319,11 +309,12 @@ def run_and_save_monte_carlo(
         project_root=project_root,
         n_runs=n_runs,
         seed=seed,
+        n_workers=n_workers,
     )
 
-    summary = summarize_monte_carlo(mc_results)
+    save_csv(mc_results, output_dir / "MC_BAU_timeseries_results.csv")  # raw results first
 
-    save_csv(mc_results, output_dir / "MC_BAU_timeseries_results.csv")
+    summary = summarize_monte_carlo(mc_results)
     save_csv(summary, output_dir / "MC_BAU_timeseries_summary.csv")
     # Original 2×2 figure
     plot_monte_carlo_summary(
