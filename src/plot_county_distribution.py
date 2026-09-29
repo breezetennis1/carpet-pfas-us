@@ -78,9 +78,15 @@ def plot_county_map_percentile(
 ) -> None:
     values = gdf[value_col].dropna()
 
-    vmin = values.min()
-    vmedian = values.median()
-    vmax = values.max()
+    quantiles = values.quantile([0, 0.25, 0.5, 0.75, 1])
+
+    def format_tick_value(v: float) -> str:
+        if abs(v) >= 100:
+            return f"{v:.0f}"
+        elif abs(v) >= 10:
+            return f"{v:.1f}"
+        else:
+            return f"{v:.2f}"
 
     gdf.plot(
         column=pct_col,
@@ -129,13 +135,9 @@ def plot_county_map_percentile(
         orientation="vertical",
     )
 
-    cbar.set_ticks([0, 0.5, 1])
+    cbar.set_ticks([0, 0.25, 0.5, 0.75, 1])
     cbar.set_ticklabels(
-        [
-            f"{vmin:.2f}",
-            f"{vmedian:.2f}",
-            f"{vmax:.2f}",
-        ]
+        [format_tick_value(v) for v in quantiles]
     )
 
     cbar.set_label(cbar_label, fontsize=10, labelpad=6)
@@ -184,19 +186,35 @@ def plot_county_figure3(project_root: Path) -> None:
     county_names = gdf[["GeoID", "County", "State"]].copy()
 
     # Top counties for time-series highlight
-    stock_top = (
-        stock_long[stock_long["year"] == 2020]
+    stock_top_full = (
+        stock_long[stock_long["year"] == 2060]
         .merge(county_names, on="GeoID", how="left")
         .sort_values("stock_kg", ascending=False)
-        .head(3)[["GeoID", "County", "State"]]
+        .head(3)[["GeoID", "County", "State", "stock_kg"]]
     )
+    stock_top = stock_top_full[["GeoID", "County", "State"]]
 
-    pcemi_top = (
-        pcemi_long[pcemi_long["year"] == 2020]
+    pcemi_top_full = (
+        pcemi_long[pcemi_long["year"] == 2060]
         .merge(county_names, on="GeoID", how="left")
         .sort_values("pc_emission_mg_cap_year", ascending=False)
-        .head(3)[["GeoID", "County", "State"]]
+        .head(3)[["GeoID", "County", "State", "pc_emission_mg_cap_year"]]
     )
+    pcemi_top = pcemi_top_full[["GeoID", "County", "State"]]
+
+    print("Top 3 counties by in-use stock (2060):")
+    for _, row in stock_top_full.iterrows():
+        print(
+            f"  {row['GeoID']}  {row['County']}, {row['State']}  "
+            f"stock_kg={row['stock_kg']:.4f}"
+        )
+
+    print("Top 3 counties by per-capita in-use emission (2060):")
+    for _, row in pcemi_top_full.iterrows():
+        print(
+            f"  {row['GeoID']}  {row['County']}, {row['State']}  "
+            f"pc_emission_mg_cap_year={row['pc_emission_mg_cap_year']:.4f}"
+        )
 
     plt.rcParams["font.family"] = "Arial"
 
@@ -287,6 +305,7 @@ def plot_county_figure3(project_root: Path) -> None:
 
     ax4.set_ylabel("Per capita in-use emission (mg/cap/year)")
     ax4.set_xlim(YEAR_START, YEAR_END)
+    ax4.set_ylim(0, 30)
     ax4.legend(frameon=False, fontsize=8)
     ax4.text(
         0.02,
