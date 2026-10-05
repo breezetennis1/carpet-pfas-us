@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 import pandas as pd
 import geopandas as gpd
@@ -162,122 +163,65 @@ def plot_landfill_map_percentile(
     cbar.set_label(unit_label, fontsize=14, labelpad=10, fontname="Arial")
 
 
-def plot_accumulation_lines(ax, landfill_accum):
+STATE_ABBREV = {
+    1: "AL", 4: "AZ", 5: "AR", 6: "CA", 8: "CO", 9: "CT", 10: "DE", 11: "DC", 12: "FL", 13: "GA",
+    16: "ID", 17: "IL", 18: "IN", 19: "IA", 20: "KS", 21: "KY", 22: "LA", 23: "ME", 24: "MD", 25: "MA",
+    26: "MI", 27: "MN", 28: "MS", 29: "MO", 30: "MT", 31: "NE", 32: "NV", 33: "NH", 34: "NJ", 35: "NM",
+    36: "NY", 37: "NC", 38: "ND", 39: "OH", 40: "OK", 41: "OR", 42: "PA", 44: "RI", 45: "SC", 46: "SD",
+    47: "TN", 48: "TX", 49: "UT", 50: "VT", 51: "VA", 53: "WA", 54: "WV", 55: "WI", 56: "WY",
+}
+
+# Colors assigned per landfill (same landfill, same color in both panels), in order of first appearance
+HIGHLIGHT_COLORS = ["red", "blue", "green", "purple", "darkorange", "saddlebrown"]
+HIGHLIGHT_YEAR = "2060"
+N_HIGHLIGHT = 3
+LEGEND_HEADROOM = 1.35  # y-axis upper limit = max x headroom, leaving space for the legend
+
+
+def landfill_label(row) -> str:
+    name = re.sub(r"\bLF\b", "Landfill", str(row["Landfill Name"]).strip())
+    state = STATE_ABBREV.get(int(row["STATEFP"]), "") if pd.notna(row.get("STATEFP")) else ""
+    return f"{name}, {state}" if state else name
+
+
+def top_named_landfills(gdf, year: str = HIGHLIGHT_YEAR, n: int = N_HIGHLIGHT):
+    """The n landfills with the highest value in `year`, skipping landfills without a name."""
+    names = gdf["Landfill Name"].astype(str).str.strip()
+    named = gdf[gdf["Landfill Name"].notna() & ~names.isin(["", "<Null>", "nan"])]
+    return named.sort_values(year, ascending=False).head(n)
+
+
+def highlight_colors(*tops) -> dict:
+    """One color per highlighted facility_id, shared across panels."""
+    colors = {}
+    for top in tops:
+        for fid in top["facility_id"]:
+            if fid not in colors:
+                colors[fid] = HIGHLIGHT_COLORS[len(colors) % len(HIGHLIGHT_COLORS)]
+    return colors
+
+
+def plot_lines_with_top(ax, gdf, ylabel: str, top, colors: dict):
+    """Grey line per landfill; the top named landfills in 2060 highlighted, named in a legend."""
     years = list(range(START_YEAR, END_YEAR + 1))
-    landfill_accum_sub = landfill_accum[YEARS]
 
-    highlighted_accum = {
-        701: "Warren County District Landfill, NJ",
-        693: "Middlesex County LF, NJ",
-        1325: "Lansing Landfill, IL",
-    }
+    for idx, row in gdf[YEARS].iterrows():
+        if idx not in top.index:
+            ax.plot(years, row.astype(float), color="grey", linewidth=0.05, alpha=0.35)
 
-    highlight_colors_accum = {
-        701: "red",
-        693: "blue",
-        1325: "green",
-    }
-
-    for index, row in landfill_accum_sub.iterrows():
-        row = row.astype(float)
-
-        if index in highlighted_accum:
-            color = highlight_colors_accum[index]
-            ax.plot(years, row, linewidth=2.3, color=color)
-
-            if index == 701:
-                ax.annotate(
-                    highlighted_accum[index],
-                    xy=(years[-1], row.iloc[-1]),
-                    xytext=(2034, row.iloc[-1] + 300),
-                    fontsize=14,
-                    color=color,
-                    fontname="Arial",
-                )
-            elif index == 693:
-                ax.annotate(
-                    highlighted_accum[index],
-                    xy=(years[-1], row.iloc[-1]),
-                    xytext=(2031, row.iloc[-1] - 4700),
-                    fontsize=14,
-                    color=color,
-                    fontname="Arial",
-                )
-            elif index == 1325:
-                ax.annotate(
-                    highlighted_accum[index],
-                    xy=(years[-1], row.iloc[-1]),
-                    xytext=(2031, row.iloc[-1] - 5200),
-                    fontsize=14,
-                    color=color,
-                    fontname="Arial",
-                )
-        else:
-            ax.plot(years, row, color="grey", linewidth=0.05, alpha=0.35)
+    for idx, row in top.iterrows():
+        ax.plot(years, row[YEARS].astype(float), linewidth=2.3, color=colors[row["facility_id"]],
+                label=landfill_label(row))
 
     style_axis(ax)
-    ax.set_ylabel("PFAS accumulation in landfills (kg)", fontsize=12, fontname="Arial")
+    ax.set_ylabel(ylabel, fontsize=12, fontname="Arial")
     ax.set_xlim([START_YEAR, END_YEAR])
+    ax.set_ylim(0, float(gdf[YEARS].to_numpy().max()) * LEGEND_HEADROOM)
     ax.tick_params(labelsize=10)
+    ax.legend(loc="upper left", frameon=False, fontsize=11, handlelength=1.6)
 
-
-def plot_leachate_lines(ax, landfill_leachate):
-    years = list(range(START_YEAR, END_YEAR + 1))
-    leachate_sub = landfill_leachate[YEARS]
-
-    highlighted_leachate = {
-        701: "Warren County District Landfill, NJ",
-        1138: "Cedar Hills Regional Landfill, WA",
-        1310: "Braintree Landfill, MA"
-    }
-
-    highlight_colors_leachate = {
-        701: "red",
-        1138: "blue",
-        1310: "green",
-    }
-
-    for index, row in leachate_sub.iterrows():
-        row = row.astype(float)
-
-        if index in highlighted_leachate:
-            color = highlight_colors_leachate[index]
-            ax.plot(years, row, linewidth=2.3, color=color)
-
-            if index == 701:
-                ax.annotate(
-                    highlighted_leachate[index],
-                    xy=(years[-1], row.iloc[-1]),
-                    xytext=(2016, row.iloc[-1] - 12),
-                    fontsize=14,
-                    color=color,
-                    fontname="Arial",
-                )
-            elif index == 1138:
-                ax.annotate(
-                    highlighted_leachate[index],
-                    xy=(years[-1], row.iloc[-1]),
-                    xytext=(2001, row.iloc[-1] - 5),
-                    fontsize=14,
-                    color=color,
-                    fontname="Arial",
-                )
-            elif index == 1310:
-                ax.annotate(
-                    highlighted_leachate[index],
-                    xy=(years[-1], row.iloc[-1]),
-                    xytext=(2018, row.iloc[-1] + 3),
-                    fontsize=14,
-                    color=color,
-                    fontname="Arial",
-                )
-        else:
-            ax.plot(years, row, color="grey", linewidth=0.05, alpha=0.35)
-
-    style_axis(ax)
-    ax.set_ylabel("PFAS in landfill leachate (kg/year)", fontsize=12, fontname="Arial")
-    ax.set_xlim([START_YEAR, END_YEAR])
-    ax.tick_params(labelsize=10)
+    print(f"Highlighted ({ylabel}, {HIGHLIGHT_YEAR}): "
+          + "; ".join(f"{landfill_label(r)} = {r[HIGHLIGHT_YEAR]:.2f}" for _, r in top.iterrows()))
 
 
 def make_landfill_figure(project_root: Path):
@@ -303,6 +247,10 @@ def make_landfill_figure(project_root: Path):
 
     landfill_accum = prepare_landfill_gdf(accum_path).to_crs(states_sub.crs)
     landfill_leachate = prepare_landfill_gdf(leachate_path).to_crs(states_sub.crs)
+
+    top_accum = top_named_landfills(landfill_accum)
+    top_leachate = top_named_landfills(landfill_leachate)
+    colors = highlight_colors(top_accum, top_leachate)
 
     fig = plt.figure(figsize=(18, 10))
 
@@ -332,10 +280,7 @@ def make_landfill_figure(project_root: Path):
         marker_size_max=900,
     )
 
-    plot_accumulation_lines(
-        ax=ax_b,
-        landfill_accum=landfill_accum,
-    )
+    plot_lines_with_top(ax_b, landfill_accum, "PFAS accumulation in landfills (kg)", top_accum, colors)
 
     plot_landfill_map_percentile(
         ax=ax_c,
@@ -349,10 +294,7 @@ def make_landfill_figure(project_root: Path):
         marker_size_max=900,
     )
 
-    plot_leachate_lines(
-        ax=ax_d,
-        landfill_leachate=landfill_leachate,
-    )
+    plot_lines_with_top(ax_d, landfill_leachate, "PFAS in landfill leachate (kg/year)", top_leachate, colors)
 
     fig.text(
         0.56, 0.89, "(a)",
@@ -388,7 +330,7 @@ def make_landfill_figure(project_root: Path):
 
     plt.savefig(
         output_dir / "landfill_accum_leachate_central_BAU.png",
-        dpi=1500,
+        dpi=600,
         bbox_inches="tight",
     )
 
