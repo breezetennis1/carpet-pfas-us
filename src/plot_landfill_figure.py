@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib as mpl
+from matplotlib.lines import Line2D
 
 # =====================================================
 # Global font settings
@@ -93,74 +94,70 @@ def style_axis(ax):
     ax.xaxis.set_ticks_position("bottom")
 
 
-def plot_landfill_map_percentile(
-    ax,
-    gdf,
-    states_sub,
-    value_col,
-    unit_label,
-    cbar_position,
-    marker_size_factor,
-    marker_size_min=0.5,
-    marker_size_max=None,
-):
-    plot_gdf = gdf.copy()
-    plot_gdf = plot_gdf[plot_gdf[value_col].fillna(0) > 0].copy()
+# Five classes with round breaks that split the high end (2020 values)
+ACCUM_BREAKS = [100, 500, 2000, 5000]       # kg
+LEACHATE_BREAKS = [0.1, 0.5, 2, 5]          # kg/yr
+CLASS_SIZES = [3, 10, 30, 70, 140]          # marker area (points^2), smallest to largest class
+CLASS_COLORS = plt.get_cmap("hot_r")([0.25, 0.42, 0.58, 0.74, 0.9])
 
-    # color uses percentile
-    plot_gdf["plot_percentile"] = plot_gdf[value_col].rank(pct=True)
+MAP_CRS = "EPSG:5070"                       # Contiguous US Albers equal area (as in Figure 3)
+NON_CONTIGUOUS_STATEFP = ["02", "15", "60", "66", "69", "72", "78"]
+MAP_MARGIN = 0.02                           # fraction of the map extent on each side
+N_TOP_MAP = 3                               # landfills outlined in black on each map (largest values)
 
-    # size uses actual value, following original notebook
-    plot_gdf["plot_size"] = plot_gdf[value_col] * marker_size_factor
-    plot_gdf["plot_size"] = plot_gdf["plot_size"].clip(lower=marker_size_min)
 
-    if marker_size_max is not None:
-        plot_gdf["plot_size"] = plot_gdf["plot_size"].clip(upper=marker_size_max)
+def format_value(v: float) -> str:
+    return f"{v:,.0f}" if abs(v) >= 10 else f"{v:g}"
 
-    states_sub.boundary.plot(
-        ax=ax,
-        color="grey",
-        linewidth=0.15,
-        zorder=1,
-    )
 
-    plot_gdf.plot(
-        column="plot_percentile",
-        ax=ax,
-        cmap="hot_r",
-        edgecolor="white",
-        linewidth=0.1,
-        markersize=plot_gdf["plot_size"],
-        alpha=0.5,
-        vmin=0,
-        vmax=1,
-        zorder=2,
-    )
+def plot_landfill_map_classes(ax, gdf, states_sub, value_col: str, legend_title: str, breaks: list) -> None:
+    """
+    Landfills as circles in 5 size/color classes; the N_TOP_MAP largest are outlined in black.
+    The size legend sits just outside the map on the right.
+    """
+    plot_gdf = gdf[gdf[value_col].fillna(0) > 0].copy()
+    plot_gdf["value_class"] = np.digitize(plot_gdf[value_col], breaks)
 
-    ax.set_xlim((-125, -66))
-    ax.set_ylim((24, 50))
+    states_sub.boundary.plot(ax=ax, color="grey", linewidth=0.15, zorder=1)
+
+    for k in range(len(CLASS_SIZES)):
+        sub = plot_gdf[plot_gdf["value_class"] == k]
+        ax.scatter(sub.geometry.x, sub.geometry.y, s=CLASS_SIZES[k], color=CLASS_COLORS[k],
+                   edgecolor="white", linewidth=0.1, alpha=0.7, zorder=2 + k)
+
+    top = plot_gdf.sort_values(value_col, ascending=False).head(N_TOP_MAP)
+    ax.scatter(top.geometry.x, top.geometry.y, s=[CLASS_SIZES[k] for k in top["value_class"]],
+               facecolor="none", edgecolor="black", linewidth=1.2, zorder=10)
+
+    xmin, ymin, xmax, ymax = states_sub.total_bounds
+    dx, dy = xmax - xmin, ymax - ymin
+    ax.set_xlim(xmin - MAP_MARGIN * dx, xmax + MAP_MARGIN * dx)
+    ax.set_ylim(ymin - MAP_MARGIN * dy, ymax + MAP_MARGIN * dy)
+    ax.set_aspect("equal")
     ax.set_axis_off()
 
-    sm = plt.cm.ScalarMappable(
-        cmap="hot_r",
-        norm=plt.Normalize(vmin=0, vmax=1),
-    )
-    sm._A = []
+    labels = [f"< {format_value(breaks[0])}"]
+    labels += [f"{format_value(lo)}–{format_value(hi)}" for lo, hi in zip(breaks, breaks[1:])]
+    labels += [f"> {format_value(breaks[-1])}"]
+    handles = [
+        Line2D([0], [0], marker="o", linestyle="none", markersize=np.sqrt(size), markerfacecolor=color,
+               markeredgecolor="white", markeredgewidth=0.3, alpha=0.9)
+        for size, color in zip(CLASS_SIZES, CLASS_COLORS)
+    ]
+    handles.append(Line2D([0], [0], marker="o", linestyle="none", markersize=np.sqrt(CLASS_SIZES[-1]),
+                          markerfacecolor="none", markeredgecolor="black", markeredgewidth=1.2))
+    labels.append(f"Top {N_TOP_MAP} landfills ({value_col})")
+    legend = ax.legend(handles, labels, title=legend_title, loc="lower left", bbox_to_anchor=(1.0, 0.0),
+                       frameon=False, fontsize=10, title_fontsize=10.5, labelspacing=0.45, borderpad=0.1,
+                       handletextpad=0.5)
+    legend._legend_box.align = "left"
+    legend.set_zorder(20)
 
-    cax = ax.figure.add_axes(cbar_position)
-    cbar = ax.figure.colorbar(sm, cax=cax, orientation="vertical")
-
-    tick_percentiles = [0, 0.5, 1.0]
-    actual_values = np.percentile(
-        plot_gdf[value_col].dropna(),
-        [0, 50, 100],
-    )
-
-    cbar.set_ticks(tick_percentiles)
-    cbar.set_ticklabels([f"{v:.2f}" for v in actual_values])
-    cbar.ax.tick_params(labelsize=10, length=0)
-    cbar.outline.set_edgecolor("white")
-    cbar.set_label(unit_label, fontsize=14, labelpad=10, fontname="Arial")
+    counts = plot_gdf["value_class"].value_counts().sort_index().tolist()
+    print(f"Map classes ({legend_title}): breaks {breaks}, landfills per class {counts}")
+    names = top["Landfill Name"] if "Landfill Name" in top else top.index
+    print(f"  outlined top {N_TOP_MAP} ({value_col}): " + "; ".join(
+        f"{n} = {v:.3g}" for n, v in zip(names, top[value_col])))
 
 
 STATE_ABBREV = {
@@ -241,12 +238,10 @@ def make_landfill_figure(project_root: Path):
     state_shp_path = find_state_shapefile(project_root)
 
     states = gpd.read_file(state_shp_path)
-    states_sub = states[
-        ~states["NAME"].isin(["Alaska", "Hawaii", "Puerto Rico"])
-    ].copy()
+    states_sub = states[~states["STATEFP"].isin(NON_CONTIGUOUS_STATEFP)].to_crs(MAP_CRS)
 
-    landfill_accum = prepare_landfill_gdf(accum_path).to_crs(states_sub.crs)
-    landfill_leachate = prepare_landfill_gdf(leachate_path).to_crs(states_sub.crs)
+    landfill_accum = prepare_landfill_gdf(accum_path).to_crs(MAP_CRS)
+    landfill_leachate = prepare_landfill_gdf(leachate_path).to_crs(MAP_CRS)
 
     top_accum = top_named_landfills(landfill_accum)
     top_leachate = top_named_landfills(landfill_leachate)
@@ -268,31 +263,11 @@ def make_landfill_figure(project_root: Path):
     ax_c = plt.subplot(gs[1, 0])
     ax_d = plt.subplot(gs[1, 1])
 
-    plot_landfill_map_percentile(
-        ax=ax_a,
-        gdf=landfill_accum,
-        states_sub=states_sub,
-        value_col="2020",
-        unit_label=r"$kg$",
-        cbar_position=[0.55, 0.61, 0.012, 0.20],
-        marker_size_factor=1 / 15,
-        marker_size_min=0.5,
-        marker_size_max=900,
-    )
+    plot_landfill_map_classes(ax_a, landfill_accum, states_sub, "2020", "PFAS accumulation\n2020 (kg)", ACCUM_BREAKS)
 
     plot_lines_with_top(ax_b, landfill_accum, "PFAS accumulation in landfills (kg)", top_accum, colors)
 
-    plot_landfill_map_percentile(
-        ax=ax_c,
-        gdf=landfill_leachate,
-        states_sub=states_sub,
-        value_col="2020",
-        unit_label=r"$kg/year$",
-        cbar_position=[0.55, 0.18, 0.012, 0.20],
-        marker_size_factor=8,
-        marker_size_min=0.5,
-        marker_size_max=900,
-    )
+    plot_landfill_map_classes(ax_c, landfill_leachate, states_sub, "2020", "PFAS in leachate\n2020 (kg/year)", LEACHATE_BREAKS)
 
     plot_lines_with_top(ax_d, landfill_leachate, "PFAS in landfill leachate (kg/year)", top_leachate, colors)
 
