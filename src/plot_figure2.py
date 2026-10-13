@@ -40,7 +40,9 @@ SCENARIO_LINESTYLES = {
 }
 
 SCENARIO_START_YEAR = 2020
-UNIT_DIVISOR = 1000
+# kg -> tonnes, except landfill leachate (about 1 kg/yr), plotted in kg/year
+UNIT_DIVISORS = {"PFAS_landfill_leachate": 1}
+DEFAULT_UNIT_DIVISOR = 1000
 
 
 def _standardize_year_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -105,7 +107,7 @@ def _build_stacked_df(
     df = sp.merge(np_df, on="year").merge(pfaa, on="year")
 
     for col in ["SP", "NP", "PFAA"]:
-        df[col] = df[col] / UNIT_DIVISOR
+        df[col] = df[col] / UNIT_DIVISORS.get(metric, DEFAULT_UNIT_DIVISOR)
 
     return df
 
@@ -122,7 +124,7 @@ def _build_scenario_df(
     df = bau.merge(recycle, on="year").merge(phase, on="year")
 
     for col in ["BAU", "RECYCLE_24", "PHASE_OUT"]:
-        df[col] = df[col] / UNIT_DIVISOR
+        df[col] = df[col] / UNIT_DIVISORS.get(metric, DEFAULT_UNIT_DIVISOR)
 
     return df
 
@@ -139,7 +141,7 @@ def _build_rc_df(
     df = res.merge(com, on="year")
 
     for col in ["R", "C"]:
-        df[col] = df[col] / UNIT_DIVISOR
+        df[col] = df[col] / UNIT_DIVISORS.get(metric, DEFAULT_UNIT_DIVISOR)
 
     return df
 
@@ -198,7 +200,7 @@ def plot_figure2(
         ("F_stock", "In-use Stock \n(tonnes)"),
         ("F6", "In-use Emission \n(tonnes/year)"),
         ("F_accu_landfill", "Landfill Accumulation \n(tonnes)"),
-        ("PFAS_landfill_leachate", "Landfill Leachate \n(tonnes/year)"),
+        ("PFAS_landfill_leachate", "Landfill Leachate \n(kg/year)"),
     ]
 
     panel_labels_rc = ["(a)", "(b)", "(c)", "(d)"]

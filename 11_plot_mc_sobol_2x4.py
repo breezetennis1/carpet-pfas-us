@@ -28,7 +28,15 @@ MC_YLABELS = {
     "stock": "tonnes",
     "emission": "tonnes/year",
     "landfill_accu": "tonnes",
-    "landfill_emission": "tonnes/year",
+    "landfill_emission": "kg/year",
+}
+
+# kg -> tonnes, except leachate (about 1 kg/yr), plotted in kg/year
+MC_UNIT_DIVISOR = {
+    "stock": 1000,
+    "emission": 1000,
+    "landfill_accu": 1000,
+    "landfill_emission": 1,
 }
 
 PANEL_TITLES = {
@@ -80,9 +88,9 @@ def plot_mc_sobol_2x4(
         var = MC_VAR_MAP[out]
         x = mc["year"]
 
-        y_med = mc[f"{var}_median"] / 1000
-        y_low = mc[f"{var}_p2_5"] / 1000
-        y_high = mc[f"{var}_p97_5"] / 1000
+        y_med = mc[f"{var}_median"] / MC_UNIT_DIVISOR[out]
+        y_low = mc[f"{var}_p2_5"] / MC_UNIT_DIVISOR[out]
+        y_high = mc[f"{var}_p97_5"] / MC_UNIT_DIVISOR[out]
 
         ax.plot(x, y_med, linewidth=1.8, label="Median")
         ax.fill_between(

@@ -305,7 +305,7 @@ def plot_county_figure3(project_root: Path) -> None:
 
     ax4.set_ylabel("Per capita in-use emission (mg/cap/year)")
     ax4.set_xlim(YEAR_START, YEAR_END)
-    ax4.set_ylim(0, 30)
+    ax4.set_ylim(0, 8)  # per capita emission up to 6.6 mg/cap/year (central BAU)
     ax4.legend(frameon=False, fontsize=8)
     ax4.text(
         0.02,
