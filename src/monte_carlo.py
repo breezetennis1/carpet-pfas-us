@@ -259,19 +259,19 @@ def plot_monte_carlo_summary(
     else:
         raise ValueError(f"Unknown layout: {layout}")
 
+    # kg -> tonnes for plotting, except leachate (about 1 kg/yr), plotted in kg/year
     plot_info = [
-        ("F_stock_total", "tonnes", "(a) In-use stock"),
-        ("F6_total", "tonnes/year", "(b) In-use emission"),
-        ("F_accu_landfill_total", "tonnes", "(c) Landfill accumulation"),
-        ("PFAS_landfill_leachate_total", "tonnes/year", "(d) Landfill leachate"),
+        ("F_stock_total", "tonnes", "(a) In-use stock", 1000),
+        ("F6_total", "tonnes/year", "(b) In-use emission", 1000),
+        ("F_accu_landfill_total", "tonnes", "(c) Landfill accumulation", 1000),
+        ("PFAS_landfill_leachate_total", "kg/year", "(d) Landfill leachate", 1),
     ]
 
-    for ax, (var, ylabel, title) in zip(axes, plot_info):
+    for ax, (var, ylabel, title, divisor) in zip(axes, plot_info):
         x = summary["year"]
-        # Convert kg to tonnes only for plotting
-        y_med = summary[f"{var}_median"] / 1000
-        y_low = summary[f"{var}_p2_5"] / 1000
-        y_high = summary[f"{var}_p97_5"] / 1000
+        y_med = summary[f"{var}_median"] / divisor
+        y_low = summary[f"{var}_p2_5"] / divisor
+        y_high = summary[f"{var}_p97_5"] / divisor
 
         ax.plot(x, y_med, linewidth=1.8, label="Median")
         ax.fill_between(x, y_low, y_high, alpha=0.3, label="95% uncertainty interval")
