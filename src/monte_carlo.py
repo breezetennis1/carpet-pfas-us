@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from src.paths import get_output_dirs
 
-from src.config import PFAS_CONFIGS, PFASConfig, CarpetConfig
+from src.config import GEOMETRIC_MEAN_PARAMS, LOG_UNIFORM_PARAMS, PFAS_CONFIGS, PFASConfig, CarpetConfig
 from src.io_utils import save_csv
 from src.uncertainty import (
     EMISSION_RATES,
@@ -30,14 +30,13 @@ UNIFORM_PARAMS = {
     "Prod_emi_R",
 }
 
-# Parameters sampled as log-uniform between low and high
+# Parameters sampled as log-uniform between low and high: LOG_UNIFORM_PARAMS (src/config.py)
 # (the in-use emission rates k_air, k_dust are also log-uniform; see sample_between_low_high)
-LOG_UNIFORM_PARAMS = {
-    "P_import",
-    "P_production",
-    "xt",
-    "P_protector",
-}
+
+# The central estimates in config.py are the medians of these distributions: geometric means of low and
+# high for exactly the log-uniform parameters and the in-use losses (and P_export = P_production)
+if GEOMETRIC_MEAN_PARAMS != LOG_UNIFORM_PARAMS | {"P_export", *EMISSION_RATES.values()}:
+    raise ValueError("Geometric-mean central parameters do not match the log-uniform Monte Carlo parameters")
 
 # Outputs to track from total PFAS
 OUTPUT_COLS = [

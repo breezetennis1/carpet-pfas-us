@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 from typing import Dict, Tuple, Optional
 
 
@@ -76,7 +77,7 @@ CARPET_CONFIGS: Dict[str, CarpetConfig] = {
 
 # In-use losses (ug/m2/yr): P_yearlyloss_air = C_M (ng/m3) x 2.4 m x 12.7 /d x 365 / 1000;
 # P_yearlyloss_dust = C_d (ug/g) x 7.3 g/m2/yr.
-PFAS_CONFIGS: Dict[Tuple[str, str], PFASConfig] = {
+_PFAS_LOW_HIGH: Dict[Tuple[str, str], PFASConfig] = {
     ("NP", "high"): PFASConfig(
         subclass="NP",
         estimate="high",
@@ -87,18 +88,6 @@ PFAS_CONFIGS: Dict[Tuple[str, str], PFASConfig] = {
         P_yearlyloss_dust=39.42,
         Prod_emi_R=0.15,
         xt=20.6,
-        has_leachate=True,
-    ),
-    ("NP", "central"): PFASConfig(
-        subclass="NP",
-        estimate="central",
-        P_import=58,
-        P_production=5700,
-        P_export=5700,
-        P_yearlyloss_air=366.019,
-        P_yearlyloss_dust=19.75,
-        Prod_emi_R=0.10,
-        xt=10.6,
         has_leachate=True,
     ),
     ("NP", "low"): PFASConfig(
@@ -125,18 +114,6 @@ PFAS_CONFIGS: Dict[Tuple[str, str], PFASConfig] = {
         xt=8,
         has_leachate=True,
     ),
-    ("PFAA", "central"): PFASConfig(
-        subclass="PFAA",
-        estimate="central",
-        P_import=48,
-        P_production=5100,
-        P_export=5100,
-        P_yearlyloss_air=28.3693,
-        P_yearlyloss_dust=16.9,
-        Prod_emi_R=0.10,
-        xt=4.75,
-        has_leachate=True,
-    ),
     ("PFAA", "low"): PFASConfig(
         subclass="PFAA",
         estimate="low",
@@ -161,18 +138,6 @@ PFAS_CONFIGS: Dict[Tuple[str, str], PFASConfig] = {
         P_protector=0.01,
         use_protector=True,
     ),
-    ("SP", "central"): PFASConfig(
-        subclass="SP",
-        estimate="central",
-        P_import=488,
-        P_production=47900,
-        P_export=47900,
-        P_yearlyloss_air=0,
-        P_yearlyloss_dust=0,  # SP release during use not estimated (no carpet-specific data); 0 = not included
-        Prod_emi_R=0.10,
-        P_protector=0.0085,
-        use_protector=True,
-    ),
     ("SP", "low"): PFASConfig(
         subclass="SP",
         estimate="low",
@@ -186,3 +151,37 @@ PFAS_CONFIGS: Dict[Tuple[str, str], PFASConfig] = {
         use_protector=True,
     ),
 }
+
+
+# Parameters sampled log-uniform between low and high in the Monte Carlo analysis
+# (the in-use losses enter through the rates k = P_yearlyloss / P_production, also log-uniform)
+LOG_UNIFORM_PARAMS = frozenset({"P_import", "P_production", "xt", "P_protector"})
+
+# Parameters whose central estimate is the geometric mean of low and high. This equals the median of the
+# log-uniform Monte Carlo distribution; GM(P_yearlyloss) / GM(P_production) = GM(k).
+GEOMETRIC_MEAN_PARAMS = LOG_UNIFORM_PARAMS | {"P_export", "P_yearlyloss_air", "P_yearlyloss_dust"}
+
+
+def central_from_low_high(low: PFASConfig, high: PFASConfig) -> PFASConfig:
+    """Central PFAS config: geometric mean of low and high (0 or None if either is), arithmetic mean
+    for the uniformly sampled Prod_emi_R; the has_leachate / use_protector flags are shared."""
+    if (low.has_leachate, low.use_protector) != (high.has_leachate, high.use_protector):
+        raise ValueError(f"Low and high flags differ for {low.subclass}")
+    values = {}
+    for p in sorted(GEOMETRIC_MEAN_PARAMS):
+        lo, hi = getattr(low, p), getattr(high, p)
+        if lo is None or hi is None:
+            values[p] = None
+        elif lo == 0 or hi == 0:
+            values[p] = 0.0
+        else:
+            values[p] = math.sqrt(lo * hi)
+    return replace(high, estimate="central", Prod_emi_R=(low.Prod_emi_R + high.Prod_emi_R) / 2, **values)
+
+
+PFAS_CONFIGS: Dict[Tuple[str, str], PFASConfig] = {}
+for _subclass in ["NP", "PFAA", "SP"]:
+    _low, _high = _PFAS_LOW_HIGH[(_subclass, "low")], _PFAS_LOW_HIGH[(_subclass, "high")]
+    PFAS_CONFIGS[(_subclass, "high")] = _high
+    PFAS_CONFIGS[(_subclass, "central")] = central_from_low_high(_low, _high)
+    PFAS_CONFIGS[(_subclass, "low")] = _low
