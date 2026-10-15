@@ -95,8 +95,9 @@ def style_axis(ax):
 
 
 # Five classes with round breaks that split the high end (2020 values)
-ACCUM_BREAKS = [100, 500, 2000, 5000]       # kg
-LEACHATE_BREAKS = [0.1, 0.5, 2, 5]          # kg/yr
+ACCUM_BREAKS = [50, 250, 1000, 3000]        # kg
+LEACHATE_BREAKS = [0.1, 0.5, 2, 5]          # g/yr (leachate per landfill is well below 1 kg/yr)
+KG_TO_G = 1000
 CLASS_SIZES = [3, 10, 30, 70, 140]          # marker area (points^2), smallest to largest class
 CLASS_COLORS = plt.get_cmap("hot_r")([0.25, 0.42, 0.58, 0.74, 0.9])
 
@@ -242,6 +243,8 @@ def make_landfill_figure(project_root: Path):
 
     landfill_accum = prepare_landfill_gdf(accum_path).to_crs(MAP_CRS)
     landfill_leachate = prepare_landfill_gdf(leachate_path).to_crs(MAP_CRS)
+    year_cols = [c for c in landfill_leachate.columns if str(c).isdigit()]
+    landfill_leachate[year_cols] = landfill_leachate[year_cols] * KG_TO_G  # kg/yr -> g/yr
 
     top_accum = top_named_landfills(landfill_accum)
     top_leachate = top_named_landfills(landfill_leachate)
@@ -267,9 +270,9 @@ def make_landfill_figure(project_root: Path):
 
     plot_lines_with_top(ax_b, landfill_accum, "PFAS accumulation in landfills (kg)", top_accum, colors)
 
-    plot_landfill_map_classes(ax_c, landfill_leachate, states_sub, "2020", "PFAS in leachate\n2020 (kg/year)", LEACHATE_BREAKS)
+    plot_landfill_map_classes(ax_c, landfill_leachate, states_sub, "2020", "PFAS in leachate\n2020 (g/year)", LEACHATE_BREAKS)
 
-    plot_lines_with_top(ax_d, landfill_leachate, "PFAS in landfill leachate (kg/year)", top_leachate, colors)
+    plot_lines_with_top(ax_d, landfill_leachate, "PFAS in landfill leachate (g/year)", top_leachate, colors)
 
     fig.text(
         0.56, 0.89, "(a)",
