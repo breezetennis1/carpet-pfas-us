@@ -1,0 +1,20 @@
+principal_building_activity,buildings_thousand,floorspace_million_sqft,floorspace_million_m2,treatment,hazus_equivalent
+Education,301,8470,786.9,included,EDU1-EDU2
+Food Sales,130,757,70.3,included,COM1
+Food Service,260,1491,138.5,included,COM8
+Health Care - Inpatient,19,1287,119.6,included,COM6
+Health Care - Outpatient,44,476,44.2,included,COM7
+Laboratory,19,510,47.4,excluded,(no direct Hazus match)
+Lodging,131,2175,202.1,included,RES4-RES5
+Mercantile and Service,1272,12402,1152.2,included,"COM1, COM3"
+Office,749,12319,1144.5,included,"COM4, COM5, GOV1"
+Parking Garage,24,1652,153.5,excluded,COM10
+Public Assembly,278,4556,423.3,included,"COM8, COM9"
+Public Order and Safety,60,820,76.2,included,GOV2
+Religious Worship,366,3747,348.1,included,REL1
+Skilled Nursing,23,715,66.4,included,RES6
+Warehouse and Storage - Nonrefrigerated,733,11056,1027.1,excluded,COM2
+Warehouse and Storage - Refrigerated,28,428,39.8,excluded,COM2
+Other,50,620,57.6,excluded,-
+Vacant,319,4396,408.4,excluded,-
+All buildings,4806,67876,6305.9,total,"source: EIA CBECS 1992, Commercial Buildings Characteristics 1992, Table A68"

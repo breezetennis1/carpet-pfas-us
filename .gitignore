@@ -1,9 +1,18 @@
 # --- Generated outputs: excluded, reproducible by re-running scripts ---
 outputs/
+results/
+logs/
 
-# --- Raw data: exclude everything except the core parameter table ---
-data/*
-!data/Basic_data.csv
+# --- Large input data: distributed through the Zenodo data record (see README) ---
+data/census_tracts/
+data/transport_assignment/
+data/tl_2020_us_state/
+data/county/tl_2020_us_county/
+data/county/backup/
+
+# --- Local working files ---
+src/old_code/
+PROMPT_*.md
 
 # --- Python bytecode / cache ---
 __pycache__/

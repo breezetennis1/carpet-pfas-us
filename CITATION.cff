@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it as below."
+title: "Code for: Per- and Polyfluoroalkyl Substances (PFAS) in Carpet: Disparities in In-Use Emissions and Landfill Burden Across the United States"
+type: software
+version: 2.0.0
+date-released: 2026-10-16
+license: MIT
+repository-code: "https://github.com/breezetennis1/carpet-pfas-us"
+authors:
+  - family-names: Chen
+    given-names: Mingming
+    affiliation: "Department of Civil, Construction and Environmental Engineering, The University of Alabama"
+  - family-names: Gazmeh
+    given-names: Hossein
+    affiliation: "Department of Civil and Environmental Engineering, Rice University"
+  - family-names: Wang
+    given-names: Yuhao
+    affiliation: "Department of Civil, Construction and Environmental Engineering, The University of Alabama"
+  - family-names: Berill
+    given-names: Peter
+    affiliation: "Institute of Environmental Sciences (CML), Leiden University"
+  - family-names: Qian
+    given-names: Xinwu
+    affiliation: "Department of Civil and Environmental Engineering, Rice University"
+  - family-names: Jiang
+    given-names: Daqian
+    affiliation: "Department of Civil, Construction and Environmental Engineering, The University of Alabama"
+    email: djiang6@ua.edu

@@ -1,0 +1,14 @@
+year,total_billion_usd,residential_pct,commercial_pct,transportation_pct,residential_builder_billion,residential_replacement_billion,manufactured_housing_billion,commercial_new_construction_billion,commercial_replacement_billion,transportation_other_billion,source_report,notes
+2012,9.76,68.3,24.2,7.5,0.22,6.42,0.03,0.32,2.04,0.73,FCW Statistical Report 2012,2012 chart labels this category 'Residential contract' not 'Residential builder' as in later years -- included in residential_pct/commercial_pct totals but flagged here since the category definition may not be identical across years (see R1.4 discussion)
+2014,10.73,60.3,27.5,12.2,0.07,6.37,0.02,0.99,1.97,1.31,FCW Statistical Report 2014,
+2015,10.74,58.2,29.1,12.7,0.08,6.15,0.02,0.21,2.92,1.36,FCW Statistical Report 2015,
+2016,11.52,57.6,29.9,12.6,0.09,6.51,0.03,0.25,3.19,1.45,FCW Statistical Report 2016,
+2017,11.58,58.3,29.3,12.4,0.09,6.63,0.03,0.25,3.14,1.44,FCW Statistical Report 2017,
+2018,11.72,56.2,31.6,12.2,0.21,6.32,0.06,0.28,3.42,1.43,FCW Statistical Report 2018,
+2019,11.32,56.9,30.3,12.8,0.20,6.18,0.06,0.27,3.16,1.45,FCW Statistical Report 2019,
+2020,10.24,57.3,30.6,12.1,0.20,5.60,0.06,0.24,2.90,1.24,FCW Statistical Report 2020,
+2021,12.95,59.5,29.1,11.4,0.30,7.34,0.06,0.29,3.48,1.48,FCW Statistical Report 2021,
+2022,12.68,61.6,27.8,10.6,0.25,7.47,0.09,0.28,3.25,1.34,FCW Statistical Report 2022,
+2023,11.36,54.8,32.6,12.7,0.26,5.91,0.05,0.30,3.40,1.44,FCW Statistical Report 2023,
+2024,11.24,55.1,32.6,12.4,0.27,5.86,0.06,0.30,3.36,1.39,FCW Statistical Report 2024,
+2025,11.53,53.9,32.8,13.3,0.23,5.93,0.06,0.31,3.47,1.53,FCW Statistical Report 2025,

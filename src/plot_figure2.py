@@ -310,9 +310,9 @@ def plot_figure2(
         _format_axis(ax, ylabel, panel_labels_bottom[j], show_xlabel=False, label_right=(j in (0, 1)))
 
     scenario_handles = [
-        Line2D([0], [0], color=SCENARIO_COLORS["BAU"], lw=6, linestyle="-", label=SCENARIO_LABELS["BAU"]),
-        Line2D([0], [0], color=SCENARIO_COLORS["RECYCLE_24"], lw=6, linestyle="--", label=SCENARIO_LABELS["RECYCLE_24"]),
-        Line2D([0], [0], color=SCENARIO_COLORS["PHASE_OUT"], lw=6, linestyle="--", label=SCENARIO_LABELS["PHASE_OUT"]),
+        Line2D([0], [0], color=SCENARIO_COLORS["BAU"], lw=3.5, linestyle="-", label=SCENARIO_LABELS["BAU"]),
+        Line2D([0], [0], color=SCENARIO_COLORS["RECYCLE_24"], lw=3.5, linestyle="--", label=SCENARIO_LABELS["RECYCLE_24"]),
+        Line2D([0], [0], color=SCENARIO_COLORS["PHASE_OUT"], lw=3.5, linestyle="--", label=SCENARIO_LABELS["PHASE_OUT"]),
     ]
 
     stack_handles = [
@@ -326,21 +326,24 @@ def plot_figure2(
         Patch(facecolor=RC_COLORS["C"], edgecolor="none", alpha=0.5, label=RC_LABELS["C"]),
     ]
 
-    fig.legend(
-        handles=rc_handles + stack_handles + scenario_handles,
-        loc="lower center",
-        ncol=8,
-        frameon=True,
-        bbox_to_anchor=(0.5, 0.01),
-        handlelength=2.6,
-        columnspacing=1.6,
-    )
+    # One legend per row, in the row's first panel, below the panel label (upper right is empty after 2020)
+    for row, handles in enumerate([rc_handles, stack_handles, scenario_handles]):
+        axes[row, 0].legend(
+            handles=handles,
+            loc="upper right",
+            bbox_to_anchor=(0.99, 0.86),
+            frameon=False,
+            fontsize=16,
+            handlelength=2.2,
+            labelspacing=0.3,
+            borderaxespad=0.2,
+        )
 
     plt.subplots_adjust(
         left=0.08,
         right=0.99,
         top=0.96,
-        bottom=0.12,
+        bottom=0.06,
         wspace=0.35,
         hspace=0.28,
     )
